@@ -3,6 +3,7 @@ import librosa
 import librosa.effects
 import soundfile as sf
 import numpy as np
+import subprocess
 import tempfile
 import os
 import shutil
@@ -18,8 +19,13 @@ KEY_DISPLAY = {
     "A#": "A#/Bb",
 }
 
-OUTPUT_FORMATS = ["WAV", "MP3", "MP4"]
+OUTPUT_FORMATS = ["WAV", "MP3"]
 FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None
+
+VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+MAX_AUDIO_MB = 50
+MAX_VIDEO_MB = 200
+MAX_DURATION_SEC = 600  # 10 minutes
 
 NOTE_MAP = {
     "C": 0, "C#": 1, "Db": 1, "D": 2, "D#": 3, "Eb": 3,
@@ -45,10 +51,68 @@ def _key_semitone(key_str: str) -> int:
     return NOTE_MAP[note]
 
 
+def _resolve_path(file) -> str | None:
+    if file is None:
+        return None
+    if isinstance(file, str):
+        return file
+    if isinstance(file, dict):
+        return file.get("path") or file.get("name")
+    if hasattr(file, "path"):
+        return file.path
+    if hasattr(file, "name"):
+        return file.name
+    return str(file)
+
+
+def _extract_audio_from_video(video_path: str) -> str:
+    """Use ffmpeg to strip video, return path to extracted WAV."""
+    fd, wav_path = tempfile.mkstemp(suffix=".wav")
+    os.close(fd)
+    result = subprocess.run(
+        ["ffmpeg", "-i", video_path, "-vn", "-acodec", "pcm_s16le",
+         "-ar", "44100", "-ac", "2", wav_path, "-y"],
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        os.remove(wav_path)
+        raise ValueError("無法從影片擷取音軌，請確認影片包含音頻。")
+    return wav_path
+
+
+def _prepare_audio(file_path: str) -> tuple[str, bool]:
+    """
+    Returns (audio_path, needs_cleanup).
+    If input is a video, extracts audio first.
+    Raises ValueError with user-friendly message on validation failure.
+    """
+    ext = os.path.splitext(file_path)[1].lower()
+    size_mb = os.path.getsize(file_path) / 1024 / 1024
+
+    is_video = ext in VIDEO_EXTS
+    limit_mb = MAX_VIDEO_MB if is_video else MAX_AUDIO_MB
+
+    if size_mb > limit_mb:
+        kind = "影片" if is_video else "音頻"
+        raise ValueError(f"{kind}檔案過大（{size_mb:.0f} MB），上限為 {limit_mb} MB。")
+
+    if is_video:
+        if not FFMPEG_AVAILABLE:
+            raise ValueError("伺服器未安裝 ffmpeg，無法處理影片檔案。")
+        audio_path = _extract_audio_from_video(file_path)
+        return audio_path, True
+
+    return file_path, False
+
+
 def detect_key(audio_path: str):
     y, sr = librosa.load(audio_path, mono=True)
     if len(y) == 0:
         raise ValueError("音頻檔案為空或無法讀取。")
+
+    duration = len(y) / sr
+    if duration > MAX_DURATION_SEC:
+        raise ValueError(f"音頻長度 {duration/60:.1f} 分鐘，超過上限 {MAX_DURATION_SEC//60} 分鐘。")
 
     chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
     chroma_mean = chroma.mean(axis=1)
@@ -119,33 +183,25 @@ def capo_suggestions(key_str: str) -> str:
     return "\n".join(r[1] for r in results)
 
 
-def _resolve_path(file) -> str | None:
-    if file is None:
-        return None
-    if isinstance(file, str):
-        return file
-    if isinstance(file, dict):
-        return file.get("path") or file.get("name")
-    if hasattr(file, "path"):
-        return file.path
-    if hasattr(file, "name"):
-        return file.name
-    return str(file)
-
-
 def process_upload(file):
     if not file:
         return "", "—", "", ""
-    audio_path = _resolve_path(file)
-    if not audio_path:
+    file_path = _resolve_path(file)
+    if not file_path:
         return "無法取得檔案路徑", "—", "", ""
-    size_mb = os.path.getsize(audio_path) / 1024 / 1024 if os.path.exists(audio_path) else 0
-    if size_mb > 50:
-        return f"檔案過大（{size_mb:.0f} MB），請壓縮至 50 MB 以下再上傳。", "—", "", ""
+
+    extracted = None
     try:
+        audio_path, needs_cleanup = _prepare_audio(file_path)
+        if needs_cleanup:
+            extracted = audio_path
         key, conf = detect_key(audio_path)
     except Exception as e:
-        return f"偵測失敗：{e}", "—", "", ""
+        return str(e), "—", "", ""
+    finally:
+        if extracted and os.path.exists(extracted):
+            os.remove(extracted)
+
     rkey = result_key(key, 0)
     capo = capo_suggestions(rkey)
     return key, f"{conf}%", rkey, capo
@@ -164,34 +220,44 @@ def _write_wav(y: np.ndarray, sr: int) -> str:
     return wav_path
 
 
-def _convert_with_pydub(wav_path: str, fmt: str) -> str:
-    from pydub import AudioSegment
-    audio = AudioSegment.from_wav(wav_path)
-    fd, out_path = tempfile.mkstemp(suffix=f".{fmt.lower()}")
+def _convert_to_mp3(wav_path: str) -> str:
+    fd, out_path = tempfile.mkstemp(suffix=".mp3")
     os.close(fd)
-    codec = "aac" if fmt == "MP4" else None
-    audio.export(out_path, format=fmt.lower(), codec=codec)
+    subprocess.run(
+        ["ffmpeg", "-i", wav_path, "-q:a", "2", out_path, "-y"],
+        capture_output=True, check=True,
+    )
     return out_path
 
 
 def transpose_audio(file, detected_key, steps, output_fmt, progress=gr.Progress()):
     if not file:
         return None, "請先上傳音頻檔案。"
-    if not detected_key:
-        return None, "請先上傳音頻以偵測調性。"
-    audio_path = _resolve_path(file)
-    if not audio_path:
+    if not detected_key or detected_key.startswith("偵測失敗") or detected_key.endswith("MB）。"):
+        return None, "請先成功上傳並偵測調性。"
+
+    file_path = _resolve_path(file)
+    if not file_path:
         return None, "無法取得檔案路徑。"
-    if output_fmt in ("MP3", "MP4") and not FFMPEG_AVAILABLE:
-        return None, f"輸出 {output_fmt} 需要 ffmpeg，目前環境不支援。"
+    if output_fmt == "MP3" and not FFMPEG_AVAILABLE:
+        return None, "輸出 MP3 需要 ffmpeg，目前環境不支援。"
 
     steps = int(steps)
-    wav_path = None
+    extracted = wav_path = None
     try:
-        progress(0.1, desc="載入音頻…")
+        progress(0.1, desc="準備音頻…")
+        audio_path, needs_cleanup = _prepare_audio(file_path)
+        if needs_cleanup:
+            extracted = audio_path
+
+        progress(0.2, desc="載入音頻…")
         y, sr = librosa.load(audio_path, mono=False)
 
-        progress(0.3, desc="移調處理中…")
+        duration = len(y) / sr if y.ndim == 1 else y.shape[1] / sr
+        if duration > MAX_DURATION_SEC:
+            return None, f"音頻長度 {duration/60:.1f} 分鐘，超過上限 {MAX_DURATION_SEC//60} 分鐘。"
+
+        progress(0.35, desc="移調處理中…")
         if steps == 0:
             y_shifted = y
         else:
@@ -210,7 +276,7 @@ def transpose_audio(file, detected_key, steps, output_fmt, progress=gr.Progress(
             out_path = wav_path
             wav_path = None
         else:
-            out_path = _convert_with_pydub(wav_path, output_fmt)
+            out_path = _convert_to_mp3(wav_path)
 
         progress(1.0, desc="完成！")
         rkey = result_key(detected_key, steps)
@@ -225,9 +291,15 @@ def transpose_audio(file, detected_key, steps, output_fmt, progress=gr.Progress(
     except Exception as e:
         return None, f"處理失敗：{e}"
     finally:
-        if wav_path and os.path.exists(wav_path):
-            os.remove(wav_path)
+        for p in (extracted, wav_path):
+            if p and os.path.exists(p):
+                os.remove(p)
 
+
+UPLOAD_NOTE = """
+> **支援格式：** MP3、WAV、M4A、FLAC（上限 50 MB）｜MP4 影片（上限 200 MB，自動擷取音軌）
+> **長度上限：** 10 分鐘｜建議上傳純音頻以加快處理速度
+"""
 
 with gr.Blocks(title="PitchPal — 音樂 Key 辨別與移調工具", css=CSS) as demo:
     gr.Markdown("# 🎵 PitchPal — 音樂 Key 辨別與移調工具")
@@ -236,9 +308,10 @@ with gr.Blocks(title="PitchPal — 音樂 Key 辨別與移調工具", css=CSS) a
     with gr.Row():
         with gr.Column(scale=1):
             audio_input = gr.File(
-                label="上傳音頻（mp3 / wav / m4a / mp4）",
+                label="上傳音頻 / 影片",
                 file_types=[".mp3", ".wav", ".m4a", ".mp4", ".ogg", ".flac"],
             )
+            gr.Markdown(UPLOAD_NOTE)
             with gr.Row():
                 detected_key_box = gr.Textbox(
                     label="原曲調性",
@@ -259,13 +332,11 @@ with gr.Blocks(title="PitchPal — 音樂 Key 辨別與移調工具", css=CSS) a
                 step=1,
                 value=0,
             )
-            with gr.Row():
-                result_key_box = gr.Textbox(
-                    label="移調後調性",
-                    interactive=False,
-                    placeholder="—",
-                    scale=3,
-                )
+            result_key_box = gr.Textbox(
+                label="移調後調性",
+                interactive=False,
+                placeholder="—",
+            )
             capo_box = gr.Textbox(
                 label="🎸 Capo 建議（吉他）",
                 interactive=False,
@@ -281,7 +352,7 @@ with gr.Blocks(title="PitchPal — 音樂 Key 辨別與移調工具", css=CSS) a
 
         with gr.Column(scale=1):
             status_box = gr.Textbox(label="狀態訊息", interactive=False)
-            audio_output = gr.Audio(label="移調後音頻（點擊下載）", type="filepath")
+            audio_output = gr.Audio(label="移調後音頻", type="filepath")
 
     audio_input.change(
         fn=process_upload,
