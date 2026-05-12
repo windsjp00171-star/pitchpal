@@ -24,58 +24,90 @@ KEY_DISPLAY = {
 }
 
 OUTPUT_FORMATS = ["WAV", "MP3", "MP4"]
-
 FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None
 
+NOTE_MAP = {
+    "C": 0, "C#": 1, "Db": 1, "D": 2, "D#": 3, "Eb": 3,
+    "E": 4, "F": 5, "F#": 6, "Gb": 6, "G": 7, "G#": 8,
+    "Ab": 8, "A": 9, "A#": 10, "Bb": 10, "B": 11,
+}
 
-def detect_key(audio_path: str) -> str:
+# Guitar-friendly open-chord keys and their semitone values
+GUITAR_KEYS = [("C", 0), ("D", 2), ("E", 4), ("G", 7), ("A", 9)]
+
+CSS = """
+.gradio-container { max-width: 900px !important; margin: auto; }
+.confidence-high  { color: #16a34a; font-weight: bold; }
+.confidence-mid   { color: #d97706; font-weight: bold; }
+.confidence-low   { color: #dc2626; font-weight: bold; }
+#capo-box textarea { font-family: monospace; font-size: 0.95em; }
+"""
+
+
+def _key_semitone(key_str: str) -> int:
+    note = key_str.split()[0].split("/")[0]
+    return NOTE_MAP[note]
+
+
+def detect_key(audio_path: str):
     y, sr = librosa.load(audio_path, mono=True)
     chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
     chroma_mean = chroma.mean(axis=1)
 
-    # Krumhansl–Schmuckler key profiles
     major_profile = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09,
                                2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
     minor_profile = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53,
                                2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
 
-    major_scores = [
-        np.corrcoef(np.roll(major_profile, i), chroma_mean)[0, 1]
-        for i in range(12)
-    ]
-    minor_scores = [
-        np.corrcoef(np.roll(minor_profile, i), chroma_mean)[0, 1]
-        for i in range(12)
-    ]
+    major_scores = [np.corrcoef(np.roll(major_profile, i), chroma_mean)[0, 1] for i in range(12)]
+    minor_scores = [np.corrcoef(np.roll(minor_profile, i), chroma_mean)[0, 1] for i in range(12)]
 
-    best_major = int(np.argmax(major_scores))
-    best_minor = int(np.argmax(minor_scores))
+    best_major_idx = int(np.argmax(major_scores))
+    best_minor_idx = int(np.argmax(minor_scores))
+    best_major_score = major_scores[best_major_idx]
+    best_minor_score = minor_scores[best_minor_idx]
 
-    if major_scores[best_major] >= minor_scores[best_minor]:
-        root = MAJOR_KEYS[best_major]
-        display = KEY_DISPLAY.get(root, root)
-        return f"{display} 大調"
+    all_scores = major_scores + minor_scores
+    score_range = max(all_scores) - min(all_scores)
+
+    if best_major_score >= best_minor_score:
+        root = MAJOR_KEYS[best_major_idx]
+        best_score = best_major_score
+        mode = "大調"
     else:
-        root = MINOR_KEYS[best_minor]
-        display = KEY_DISPLAY.get(root, root)
-        return f"{display} 小調"
+        root = MINOR_KEYS[best_minor_idx]
+        best_score = best_minor_score
+        mode = "小調"
+
+    display = KEY_DISPLAY.get(root, root)
+    key_str = f"{display} {mode}"
+
+    confidence = int((best_score - min(all_scores)) / score_range * 100) if score_range > 0 else 50
+    confidence = max(0, min(100, confidence))
+
+    return key_str, confidence
 
 
-def key_to_semitone(key_str: str) -> int:
-    note = key_str.split()[0].split("/")[0]
-    name_map = {"C": 0, "C#": 1, "Db": 1, "D": 2, "D#": 3, "Eb": 3,
-                "E": 4, "F": 5, "F#": 6, "Gb": 6, "G": 7, "G#": 8,
-                "Ab": 8, "A": 9, "A#": 10, "Bb": 10, "B": 11}
-    return name_map[note]
+def capo_suggestions(target_key_str: str) -> str:
+    if not target_key_str:
+        return ""
+    target = _key_semitone(target_key_str)
+    results = []
+    for key_name, key_semi in GUITAR_KEYS:
+        capo = (target - key_semi) % 12
+        if capo <= 7:
+            label = f"不夾 Capo" if capo == 0 else f"Capo {capo}"
+            results.append((capo, f"{label}  →  用 {key_name} 指型彈奏"))
+    results.sort(key=lambda x: x[0])
+    if not results:
+        return "此 Key 無常用 Capo 組合（建議移調到較近的 Key）"
+    return "\n".join(r[1] for r in results)
 
 
 def _write_wav(y_shifted: np.ndarray, sr: int) -> str:
     fd, wav_path = tempfile.mkstemp(suffix=".wav")
     os.close(fd)
-    if y_shifted.ndim == 1:
-        sf.write(wav_path, y_shifted, sr)
-    else:
-        sf.write(wav_path, y_shifted.T, sr)
+    sf.write(wav_path, y_shifted.T if y_shifted.ndim > 1 else y_shifted, sr)
     return wav_path
 
 
@@ -85,39 +117,50 @@ def _convert_with_pydub(wav_path: str, fmt: str) -> str:
     ext = fmt.lower()
     fd, out_path = tempfile.mkstemp(suffix=f".{ext}")
     os.close(fd)
-    # MP4 audio uses codec aac inside mp4 container
     codec = "aac" if fmt == "MP4" else None
     audio.export(out_path, format=ext, codec=codec)
     os.remove(wav_path)
     return out_path
 
 
-def transpose_audio(audio_path: str, detected_key: str, target_key: str, output_fmt: str):
+def process_upload(audio_path: str):
+    if not audio_path:
+        return "", "—", gr.update(choices=ALL_KEYS, value=None), ""
+    key, conf = detect_key(audio_path)
+    conf_label = f"{conf}%"
+    capo = capo_suggestions(key)
+    return key, conf_label, gr.update(choices=ALL_KEYS, value=key), capo
+
+
+def on_target_change(target_key: str):
+    return capo_suggestions(target_key)
+
+
+def transpose_audio(audio_path, detected_key, target_key, output_fmt, progress=gr.Progress()):
     if not audio_path:
         return None, "請先上傳音頻檔案。"
     if not detected_key:
         return None, "請先偵測原曲調性。"
     if not target_key:
         return None, "請選擇目標 Key。"
-
     if output_fmt in ("MP3", "MP4") and not FFMPEG_AVAILABLE:
-        return None, f"輸出 {output_fmt} 需要系統安裝 ffmpeg，請先安裝後再試。"
+        return None, f"輸出 {output_fmt} 需要 ffmpeg，目前環境不支援。"
 
-    src_semitone = key_to_semitone(detected_key)
-    tgt_semitone = key_to_semitone(target_key)
-
-    steps = tgt_semitone - src_semitone
+    progress(0.1, desc="載入音頻…")
+    src = _key_semitone(detected_key)
+    tgt = _key_semitone(target_key)
+    steps = tgt - src
     if steps > 6:
         steps -= 12
     elif steps < -6:
         steps += 12
 
+    y, sr = librosa.load(audio_path, mono=False)
+
     if steps == 0:
-        # No transposition needed; still honour format conversion
-        y, sr = librosa.load(audio_path, mono=False)
         y_shifted = y
     else:
-        y, sr = librosa.load(audio_path, mono=False)
+        progress(0.4, desc="移調處理中…")
         if y.ndim == 1:
             y_shifted = librosa.effects.pitch_shift(y, sr=sr, n_steps=steps)
         else:
@@ -126,67 +169,76 @@ def transpose_audio(audio_path: str, detected_key: str, target_key: str, output_
                 for ch in range(y.shape[0])
             ])
 
+    progress(0.85, desc="輸出檔案…")
     wav_path = _write_wav(y_shifted, sr)
+    out_path = wav_path if output_fmt == "WAV" else _convert_with_pydub(wav_path, output_fmt)
 
-    if output_fmt == "WAV":
-        out_path = wav_path
-    else:
-        out_path = _convert_with_pydub(wav_path, output_fmt)
-
+    progress(1.0, desc="完成！")
     direction = (f"+{steps}" if steps > 0 else str(steps)) if steps != 0 else "0"
     msg = (
-        f"原曲已是 {target_key}，無需移調，已轉換格式為 {output_fmt}。"
+        f"原曲已是 {target_key}，無需移調，已輸出為 {output_fmt}。"
         if steps == 0
-        else f"移調完成：{detected_key} → {target_key}（{direction} 個半音），格式：{output_fmt}"
+        else f"移調完成：{detected_key} → {target_key}（{direction} 個半音）｜格式：{output_fmt}"
     )
     return out_path, msg
 
 
-def process_upload(audio_path: str):
-    if not audio_path:
-        return "", gr.update(choices=ALL_KEYS, value=None)
-    key = detect_key(audio_path)
-    return key, gr.update(choices=ALL_KEYS, value=key)
-
-
-ffmpeg_note = "" if FFMPEG_AVAILABLE else "\n> ⚠️ 未偵測到 ffmpeg，MP3 / MP4 輸出暫不可用（請安裝 ffmpeg）。"
-
-with gr.Blocks(title="音樂 Key 辨別與移調工具") as demo:
-    gr.Markdown("# 🎵 音樂 Key 辨別與移調工具")
-    gr.Markdown(f"上傳音頻，自動偵測調性，選擇目標 Key 後下載移調結果。{ffmpeg_note}")
+with gr.Blocks(title="PitchPal — 音樂 Key 辨別與移調工具", css=CSS) as demo:
+    gr.Markdown("# 🎵 PitchPal — 音樂 Key 辨別與移調工具")
+    gr.Markdown("上傳音頻，自動偵測調性，選目標 Key 後下載移調結果。")
 
     with gr.Row():
-        with gr.Column():
+        with gr.Column(scale=1):
             audio_input = gr.Audio(
                 label="上傳音頻（mp3 / wav / m4a）",
                 type="filepath",
                 sources=["upload"],
             )
-            detected_key_box = gr.Textbox(
-                label="偵測到的原曲調性",
-                interactive=False,
-                placeholder="上傳後自動顯示…",
-            )
+            with gr.Row():
+                detected_key_box = gr.Textbox(
+                    label="偵測到的原曲調性",
+                    interactive=False,
+                    placeholder="上傳後自動顯示…",
+                    scale=3,
+                )
+                confidence_box = gr.Textbox(
+                    label="信心度",
+                    interactive=False,
+                    value="—",
+                    scale=1,
+                )
             target_key_drop = gr.Dropdown(
                 label="目標 Key",
                 choices=ALL_KEYS,
                 value=None,
+            )
+            capo_box = gr.Textbox(
+                label="🎸 Capo 建議（吉他）",
+                interactive=False,
+                lines=3,
+                elem_id="capo-box",
             )
             output_fmt_radio = gr.Radio(
                 label="輸出格式",
                 choices=OUTPUT_FORMATS,
                 value="WAV",
             )
-            transpose_btn = gr.Button("開始移調", variant="primary")
+            transpose_btn = gr.Button("開始移調", variant="primary", size="lg")
 
-        with gr.Column():
+        with gr.Column(scale=1):
             status_box = gr.Textbox(label="狀態訊息", interactive=False)
             audio_output = gr.Audio(label="移調後音頻（點擊下載）", type="filepath")
 
     audio_input.change(
         fn=process_upload,
         inputs=[audio_input],
-        outputs=[detected_key_box, target_key_drop],
+        outputs=[detected_key_box, confidence_box, target_key_drop, capo_box],
+    )
+
+    target_key_drop.change(
+        fn=on_target_change,
+        inputs=[target_key_drop],
+        outputs=[capo_box],
     )
 
     transpose_btn.click(
