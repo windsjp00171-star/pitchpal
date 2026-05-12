@@ -119,9 +119,10 @@ def capo_suggestions(key_str: str) -> str:
     return "\n".join(r[1] for r in results)
 
 
-def process_upload(audio_path: str):
-    if not audio_path:
+def process_upload(file):
+    if not file:
         return "", "—", "", ""
+    audio_path = file.name if hasattr(file, "name") else file
     try:
         key, conf = detect_key(audio_path)
     except Exception as e:
@@ -154,11 +155,12 @@ def _convert_with_pydub(wav_path: str, fmt: str) -> str:
     return out_path
 
 
-def transpose_audio(audio_path, detected_key, steps, output_fmt, progress=gr.Progress()):
-    if not audio_path:
+def transpose_audio(file, detected_key, steps, output_fmt, progress=gr.Progress()):
+    if not file:
         return None, "請先上傳音頻檔案。"
     if not detected_key:
         return None, "請先上傳音頻以偵測調性。"
+    audio_path = file.name if hasattr(file, "name") else file
     if output_fmt in ("MP3", "MP4") and not FFMPEG_AVAILABLE:
         return None, f"輸出 {output_fmt} 需要 ffmpeg，目前環境不支援。"
 
@@ -212,10 +214,9 @@ with gr.Blocks(title="PitchPal — 音樂 Key 辨別與移調工具", css=CSS) a
 
     with gr.Row():
         with gr.Column(scale=1):
-            audio_input = gr.Audio(
-                label="上傳音頻（mp3 / wav / m4a）",
-                type="filepath",
-                sources=["upload"],
+            audio_input = gr.File(
+                label="上傳音頻（mp3 / wav / m4a / mp4）",
+                file_types=[".mp3", ".wav", ".m4a", ".mp4", ".ogg", ".flac"],
             )
             with gr.Row():
                 detected_key_box = gr.Textbox(
