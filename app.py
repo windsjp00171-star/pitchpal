@@ -5,6 +5,7 @@ import soundfile as sf
 import numpy as np
 import tempfile
 import os
+import shutil
 
 MAJOR_KEYS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 MINOR_KEYS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
@@ -21,6 +22,10 @@ KEY_DISPLAY = {
     "G#": "G#/Ab",
     "A#": "A#/Bb",
 }
+
+OUTPUT_FORMATS = ["WAV", "MP3", "MP4"]
+
+FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None
 
 
 def detect_key(audio_path: str) -> str:
@@ -57,17 +62,37 @@ def detect_key(audio_path: str) -> str:
 
 
 def key_to_semitone(key_str: str) -> int:
-    """Return the pitch class (0–11) for a key string like 'G 大調'."""
-    note = key_str.split()[0]
-    # Normalise slash notation e.g. C#/Db → C#
-    note = note.split("/")[0]
+    note = key_str.split()[0].split("/")[0]
     name_map = {"C": 0, "C#": 1, "Db": 1, "D": 2, "D#": 3, "Eb": 3,
                 "E": 4, "F": 5, "F#": 6, "Gb": 6, "G": 7, "G#": 8,
                 "Ab": 8, "A": 9, "A#": 10, "Bb": 10, "B": 11}
     return name_map[note]
 
 
-def transpose_audio(audio_path: str, detected_key: str, target_key: str):
+def _write_wav(y_shifted: np.ndarray, sr: int) -> str:
+    fd, wav_path = tempfile.mkstemp(suffix=".wav")
+    os.close(fd)
+    if y_shifted.ndim == 1:
+        sf.write(wav_path, y_shifted, sr)
+    else:
+        sf.write(wav_path, y_shifted.T, sr)
+    return wav_path
+
+
+def _convert_with_pydub(wav_path: str, fmt: str) -> str:
+    from pydub import AudioSegment
+    audio = AudioSegment.from_wav(wav_path)
+    ext = fmt.lower()
+    fd, out_path = tempfile.mkstemp(suffix=f".{ext}")
+    os.close(fd)
+    # MP4 audio uses codec aac inside mp4 container
+    codec = "aac" if fmt == "MP4" else None
+    audio.export(out_path, format=ext, codec=codec)
+    os.remove(wav_path)
+    return out_path
+
+
+def transpose_audio(audio_path: str, detected_key: str, target_key: str, output_fmt: str):
     if not audio_path:
         return None, "請先上傳音頻檔案。"
     if not detected_key:
@@ -75,43 +100,45 @@ def transpose_audio(audio_path: str, detected_key: str, target_key: str):
     if not target_key:
         return None, "請選擇目標 Key。"
 
+    if output_fmt in ("MP3", "MP4") and not FFMPEG_AVAILABLE:
+        return None, f"輸出 {output_fmt} 需要系統安裝 ffmpeg，請先安裝後再試。"
+
     src_semitone = key_to_semitone(detected_key)
     tgt_semitone = key_to_semitone(target_key)
 
-    # Determine mode match (both major or both minor) to pick shortest path
-    src_minor = "小調" in detected_key
-    tgt_minor = "小調" in target_key
-
     steps = tgt_semitone - src_semitone
-    # Always take the shortest chromatic interval (−6 to +6)
     if steps > 6:
         steps -= 12
     elif steps < -6:
         steps += 12
 
     if steps == 0:
-        return audio_path, f"原曲已是 {target_key}，無需移調。"
-
-    y, sr = librosa.load(audio_path, mono=False)
-    if y.ndim == 1:
-        y_shifted = librosa.effects.pitch_shift(y, sr=sr, n_steps=steps)
+        # No transposition needed; still honour format conversion
+        y, sr = librosa.load(audio_path, mono=False)
+        y_shifted = y
     else:
-        # Stereo: process each channel
-        y_shifted = np.stack([
-            librosa.effects.pitch_shift(y[ch], sr=sr, n_steps=steps)
-            for ch in range(y.shape[0])
-        ])
+        y, sr = librosa.load(audio_path, mono=False)
+        if y.ndim == 1:
+            y_shifted = librosa.effects.pitch_shift(y, sr=sr, n_steps=steps)
+        else:
+            y_shifted = np.stack([
+                librosa.effects.pitch_shift(y[ch], sr=sr, n_steps=steps)
+                for ch in range(y.shape[0])
+            ])
 
-    out_fd, out_path = tempfile.mkstemp(suffix=".wav")
-    os.close(out_fd)
+    wav_path = _write_wav(y_shifted, sr)
 
-    if y_shifted.ndim == 1:
-        sf.write(out_path, y_shifted, sr)
+    if output_fmt == "WAV":
+        out_path = wav_path
     else:
-        sf.write(out_path, y_shifted.T, sr)
+        out_path = _convert_with_pydub(wav_path, output_fmt)
 
-    direction = f"+{steps}" if steps > 0 else str(steps)
-    msg = f"移調完成：{detected_key} → {target_key}（{direction} 個半音）"
+    direction = (f"+{steps}" if steps > 0 else str(steps)) if steps != 0 else "0"
+    msg = (
+        f"原曲已是 {target_key}，無需移調，已轉換格式為 {output_fmt}。"
+        if steps == 0
+        else f"移調完成：{detected_key} → {target_key}（{direction} 個半音），格式：{output_fmt}"
+    )
     return out_path, msg
 
 
@@ -122,9 +149,11 @@ def process_upload(audio_path: str):
     return key, gr.update(choices=ALL_KEYS, value=key)
 
 
+ffmpeg_note = "" if FFMPEG_AVAILABLE else "\n> ⚠️ 未偵測到 ffmpeg，MP3 / MP4 輸出暫不可用（請安裝 ffmpeg）。"
+
 with gr.Blocks(title="音樂 Key 辨別與移調工具") as demo:
     gr.Markdown("# 🎵 音樂 Key 辨別與移調工具")
-    gr.Markdown("上傳音頻，自動偵測調性，選擇目標 Key 後下載移調結果。")
+    gr.Markdown(f"上傳音頻，自動偵測調性，選擇目標 Key 後下載移調結果。{ffmpeg_note}")
 
     with gr.Row():
         with gr.Column():
@@ -143,13 +172,17 @@ with gr.Blocks(title="音樂 Key 辨別與移調工具") as demo:
                 choices=ALL_KEYS,
                 value=None,
             )
+            output_fmt_radio = gr.Radio(
+                label="輸出格式",
+                choices=OUTPUT_FORMATS,
+                value="WAV",
+            )
             transpose_btn = gr.Button("開始移調", variant="primary")
 
         with gr.Column():
             status_box = gr.Textbox(label="狀態訊息", interactive=False)
             audio_output = gr.Audio(label="移調後音頻（點擊下載）", type="filepath")
 
-    # Auto-detect key on upload
     audio_input.change(
         fn=process_upload,
         inputs=[audio_input],
@@ -158,7 +191,7 @@ with gr.Blocks(title="音樂 Key 辨別與移調工具") as demo:
 
     transpose_btn.click(
         fn=transpose_audio,
-        inputs=[audio_input, detected_key_box, target_key_drop],
+        inputs=[audio_input, detected_key_box, target_key_drop, output_fmt_radio],
         outputs=[audio_output, status_box],
     )
 
