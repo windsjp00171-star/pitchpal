@@ -119,10 +119,29 @@ def capo_suggestions(key_str: str) -> str:
     return "\n".join(r[1] for r in results)
 
 
+def _resolve_path(file) -> str | None:
+    if file is None:
+        return None
+    if isinstance(file, str):
+        return file
+    if isinstance(file, dict):
+        return file.get("path") or file.get("name")
+    if hasattr(file, "path"):
+        return file.path
+    if hasattr(file, "name"):
+        return file.name
+    return str(file)
+
+
 def process_upload(file):
     if not file:
         return "", "—", "", ""
-    audio_path = file.name if hasattr(file, "name") else file
+    audio_path = _resolve_path(file)
+    if not audio_path:
+        return "無法取得檔案路徑", "—", "", ""
+    size_mb = os.path.getsize(audio_path) / 1024 / 1024 if os.path.exists(audio_path) else 0
+    if size_mb > 50:
+        return f"檔案過大（{size_mb:.0f} MB），請壓縮至 50 MB 以下再上傳。", "—", "", ""
     try:
         key, conf = detect_key(audio_path)
     except Exception as e:
@@ -160,7 +179,9 @@ def transpose_audio(file, detected_key, steps, output_fmt, progress=gr.Progress(
         return None, "請先上傳音頻檔案。"
     if not detected_key:
         return None, "請先上傳音頻以偵測調性。"
-    audio_path = file.name if hasattr(file, "name") else file
+    audio_path = _resolve_path(file)
+    if not audio_path:
+        return None, "無法取得檔案路徑。"
     if output_fmt in ("MP3", "MP4") and not FFMPEG_AVAILABLE:
         return None, f"輸出 {output_fmt} 需要 ffmpeg，目前環境不支援。"
 
