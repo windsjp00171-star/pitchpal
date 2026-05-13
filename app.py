@@ -529,7 +529,11 @@ with gr.Blocks(title="PitchPal — 音樂 Key 辨別與移調工具", css=CSS) a
                     audio_output = gr.Audio(label="移調後音頻", type="filepath")
 
                     gr.Markdown("---")
-                    gr.Markdown("**偵測結果不正確？幫我們改善準確率：**")
+                    gr.Markdown("""**偵測結果不正確？幫我們改善準確率 🙏**
+
+每一筆回報都會被記錄下來，累積足夠數據後用來優化辨識演算法，讓工具對大家越來越準確。
+
+_填入正確調性後按「回報修正」即可，不需要登入。_""")
                     feedback_key = gr.Dropdown(
                         label="正確調性",
                         choices=ALL_KEYS,
