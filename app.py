@@ -466,6 +466,28 @@ JIANPU_HELP = """
 ```
 """
 
+def _submit_feedback(file, detected, conf_str, corrected, notes):
+    filename = ""
+    if file:
+        p = _resolve_path(file)
+        filename = os.path.basename(p) if p else ""
+    try:
+        conf = int(conf_str.replace("%", ""))
+    except Exception:
+        conf = None
+    return submit_feedback(filename, detected, corrected, conf, notes)
+
+
+def _gen_melody(text, key, bpm, octave):
+    if not text or not text.strip():
+        return None, "請先輸入旋律。"
+    try:
+        path = parse_and_synth(text, key, int(bpm), int(octave))
+        return path, f"生成完成｜調性：{key}，BPM：{bpm}"
+    except Exception as e:
+        return None, f"生成失敗：{e}"
+
+
 UPLOAD_NOTE = """
 > **支援格式：** MP3、WAV、M4A、FLAC（上限 50 MB）｜MP4 影片（上限 200 MB，自動擷取音軌）
 > **長度上限：** 10 分鐘｜建議上傳純音頻以加快處理速度
@@ -562,20 +584,8 @@ _填入正確調性後按「回報修正」即可，不需要登入。_""")
                 inputs=[audio_input, detected_key_box, steps_slider, output_fmt_radio],
                 outputs=[audio_output, status_box],
             )
-
-            def _submit(file, detected, conf_str, corrected, notes):
-                filename = ""
-                if file:
-                    p = _resolve_path(file)
-                    filename = os.path.basename(p) if p else ""
-                try:
-                    conf = int(conf_str.replace("%", ""))
-                except Exception:
-                    conf = None
-                return submit_feedback(filename, detected, corrected, conf, notes)
-
             feedback_btn.click(
-                fn=_submit,
+                fn=_submit_feedback,
                 inputs=[audio_input, detected_key_box, confidence_box,
                         feedback_key, feedback_notes],
                 outputs=[feedback_status],
@@ -620,15 +630,6 @@ _填入正確調性後按「回報修正」即可，不需要登入。_""")
                     gr.Markdown(JIANPU_HELP)
                     melody_status = gr.Textbox(label="狀態", interactive=False)
                     melody_output = gr.Audio(label="旋律音頻", type="filepath")
-
-            def _gen_melody(text, key, bpm, octave):
-                if not text.strip():
-                    return None, "請先輸入旋律。"
-                try:
-                    path = parse_and_synth(text, key, int(bpm), int(octave))
-                    return path, f"生成完成｜調性：{key}，BPM：{bpm}"
-                except Exception as e:
-                    return None, f"生成失敗：{e}"
 
             melody_btn.click(
                 fn=_gen_melody,
