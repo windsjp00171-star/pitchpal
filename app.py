@@ -245,27 +245,34 @@ def capo_suggestions(key_str: str) -> str:
 
 
 def process_upload(file):
-    if not file:
-        return "", "—", "", ""
-    file_path = _resolve_path(file)
-    if not file_path:
-        return "無法取得檔案路徑", "—", "", ""
-
-    extracted = None
+    import traceback
     try:
-        audio_path, needs_cleanup = _prepare_audio(file_path)
-        if needs_cleanup:
-            extracted = audio_path
-        key, conf = detect_key(audio_path)
-    except Exception as e:
-        return str(e), "—", "", ""
-    finally:
-        if extracted and os.path.exists(extracted):
-            os.remove(extracted)
+        if not file:
+            return "", "—", "", ""
+        file_path = _resolve_path(file)
+        print(f"[pitchpal] process_upload: type={type(file).__name__}, path={file_path!r}")
+        if not file_path:
+            return "無法取得檔案路徑", "—", "", ""
+        if not os.path.exists(file_path):
+            return f"檔案不存在：{file_path}", "—", "", ""
 
-    rkey = result_key(key, 0)
-    capo = capo_suggestions(rkey)
-    return key, f"{conf}%", rkey, capo
+        extracted = None
+        try:
+            audio_path, needs_cleanup = _prepare_audio(file_path)
+            if needs_cleanup:
+                extracted = audio_path
+            key, conf = detect_key(audio_path)
+        finally:
+            if extracted and os.path.exists(extracted):
+                os.remove(extracted)
+
+        rkey = result_key(key, 0)
+        capo = capo_suggestions(rkey)
+        return key, f"{conf}%", rkey, capo
+    except Exception as e:
+        msg = f"{type(e).__name__}: {e}"
+        print(f"[pitchpal] process_upload error:\n{traceback.format_exc()}")
+        return msg, "—", "", ""
 
 
 def on_slider_change(detected_key: str, steps: int):
@@ -501,7 +508,7 @@ with gr.Blocks(title="PitchPal — 音樂 Key 辨別與移調工具", css=CSS) a
                     audio_input = gr.Audio(
                         label="上傳音頻（mp3 / wav / m4a / flac）",
                         type="filepath",
-                        source="upload",
+                        sources=["upload"],
                     )
                     gr.Markdown(UPLOAD_NOTE)
                     with gr.Row():
