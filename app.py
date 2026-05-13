@@ -291,7 +291,7 @@ def _convert_to_mp3(wav_path: str) -> str:
     return out_path
 
 
-def transpose_audio(file, detected_key, steps, output_fmt, progress=gr.Progress()):
+def transpose_audio(file, detected_key, steps, output_fmt):
     if not file:
         return None, "請先上傳音頻檔案。"
 
@@ -304,19 +304,16 @@ def transpose_audio(file, detected_key, steps, output_fmt, progress=gr.Progress(
     steps = int(steps)
     extracted = wav_path = None
     try:
-        progress(0.1, desc="準備音頻…")
         audio_path, needs_cleanup = _prepare_audio(file_path)
         if needs_cleanup:
             extracted = audio_path
 
-        progress(0.2, desc="載入音頻…")
         y, sr = librosa.load(audio_path, mono=False)
 
         duration = len(y) / sr if y.ndim == 1 else y.shape[1] / sr
         if duration > MAX_DURATION_SEC:
             return None, f"音頻長度 {duration/60:.1f} 分鐘，超過上限 {MAX_DURATION_SEC//60} 分鐘。"
 
-        progress(0.35, desc="移調處理中…")
         if steps == 0:
             y_shifted = y
         else:
@@ -328,7 +325,6 @@ def transpose_audio(file, detected_key, steps, output_fmt, progress=gr.Progress(
                     for ch in range(y.shape[0])
                 ])
 
-        progress(0.85, desc="輸出檔案…")
         wav_path = _write_wav(y_shifted, sr)
 
         if output_fmt == "WAV":
@@ -337,7 +333,6 @@ def transpose_audio(file, detected_key, steps, output_fmt, progress=gr.Progress(
         else:
             out_path = _convert_to_mp3(wav_path)
 
-        progress(1.0, desc="完成！")
         direction = f"+{steps}" if steps > 0 else str(steps)
         if steps == 0:
             msg = f"無移調，已輸出為 {output_fmt}。"
