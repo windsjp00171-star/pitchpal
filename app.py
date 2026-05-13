@@ -501,7 +501,7 @@ with gr.Blocks(title="PitchPal — 音樂 Key 辨別與移調工具", css=CSS) a
                     audio_input = gr.Audio(
                         label="上傳音頻（mp3 / wav / m4a / flac）",
                         type="filepath",
-                        sources=["upload"],
+                        source="upload",
                     )
                     gr.Markdown(UPLOAD_NOTE)
                     with gr.Row():
