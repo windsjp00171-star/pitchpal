@@ -262,14 +262,15 @@ def process_upload(file):
     import traceback
     try:
         if not file:
-            return "", "—", "", ""
+            return "", "", "—", "", ""
         file_path = _resolve_path(file)
         print(f"[pitchpal] process_upload: type={type(file).__name__}, path={file_path!r}")
         if not file_path:
-            return "無法取得檔案路徑", "—", "", ""
+            return "", "無法取得檔案路徑", "—", "", ""
         if not os.path.exists(file_path):
-            return f"檔案不存在：{file_path}", "—", "", ""
+            return "", f"檔案不存在：{file_path}", "—", "", ""
 
+        filename = os.path.basename(file_path)
         extracted = None
         try:
             audio_path, needs_cleanup = _prepare_audio(file_path)
@@ -282,11 +283,11 @@ def process_upload(file):
 
         rkey = result_key(key, 0)
         capo = capo_suggestions(rkey)
-        return key, f"{conf}%", rkey, capo
+        return filename, key, f"{conf}%", rkey, capo
     except Exception as e:
         msg = f"{type(e).__name__}: {e}"
         print(f"[pitchpal] process_upload error:\n{traceback.format_exc()}")
-        return msg, "—", "", ""
+        return "", msg, "—", "", ""
 
 
 def on_slider_change(detected_key: str, steps: int):
@@ -681,11 +682,11 @@ def _gen_melody(text, key, bpm, octave, timbre, chord_text, time_sig):
 def download_youtube(url: str, cookies_file: str | None = None):
     import traceback
     if not url or not url.strip():
-        return None, "—", "—", "", "", "請輸入 YouTube 連結。"
+        return None, "", "—", "—", "", "", "請輸入 YouTube 連結。"
     try:
         import yt_dlp
     except ImportError:
-        return None, "—", "—", "", "", "yt-dlp 未安裝，請聯絡管理員。"
+        return None, "", "—", "—", "", "", "yt-dlp 未安裝，請聯絡管理員。"
 
     # Try progressively more permissive client strategies
     strategies = [
@@ -734,13 +735,13 @@ def download_youtube(url: str, cookies_file: str | None = None):
             msg = "此影片在當前地區不可用（地區限制）。"
         else:
             msg = f"所有下載方式均失敗：{msg}"
-        return None, "—", "—", "", "", f"❌ {msg}"
+        return None, "", "—", "—", "", "", f"❌ {msg}"
 
     try:
         title = info.get("title", "（未知）")
         duration = info.get("duration", 0)
         if duration and duration > 900:
-            return None, "—", "—", "", "", f"影片超過 15 分鐘（{duration//60} 分），請換較短的片段。"
+            return None, "", "—", "—", "", "", f"影片超過 15 分鐘（{duration//60} 分），請換較短的片段。"
 
         audio_path = None
         for f in os.listdir(tmpdir):
@@ -748,16 +749,16 @@ def download_youtube(url: str, cookies_file: str | None = None):
                 audio_path = os.path.join(tmpdir, f)
                 break
         if not audio_path or not os.path.exists(audio_path):
-            return None, "—", "—", "", "", "音頻擷取失敗，請確認影片可以正常播放。"
+            return None, "", "—", "—", "", "", "音頻擷取失敗，請確認影片可以正常播放。"
 
         print(f"[pitchpal] yt download ok → {audio_path}")
         key, conf = detect_key(audio_path)
         rkey = result_key(key, 0)
         capo = capo_suggestions(rkey)
-        return audio_path, key, f"{conf}%", rkey, capo, f"✅ 下載完成：《{title}》｜偵測調性：{key}"
+        return audio_path, title, key, f"{conf}%", rkey, capo, f"✅ 下載完成：《{title}》｜偵測調性：{key}"
     except Exception as e:
         print(f"[pitchpal] post-download error:\n{traceback.format_exc()}")
-        return None, "—", "—", "", "", f"下載成功但處理失敗：{e}"
+        return None, "", "—", "—", "", "", f"下載成功但處理失敗：{e}"
 
 
 UPLOAD_NOTE = """
@@ -810,6 +811,11 @@ with gr.Blocks(title="PitchPal — 音樂 Key 辨別與移調工具", css=CSS) a
                         sources=["upload"],
                     )
                     gr.Markdown(UPLOAD_NOTE)
+                    filename_box = gr.Textbox(
+                        label="檔案名稱",
+                        interactive=False,
+                        placeholder="上傳後顯示…",
+                    )
                     with gr.Row():
                         detected_key_box = gr.Textbox(
                             label="原曲調性",
@@ -875,14 +881,14 @@ with gr.Blocks(title="PitchPal — 音樂 Key 辨別與移調工具", css=CSS) a
             yt_btn.click(
                 fn=download_youtube,
                 inputs=[yt_url_box, yt_cookies_file],
-                outputs=[audio_input, detected_key_box, confidence_box,
+                outputs=[audio_input, filename_box, detected_key_box, confidence_box,
                          result_key_box, capo_box, yt_status_box],
                 api_name="download_youtube",
             )
             audio_input.change(
                 fn=process_upload,
                 inputs=[audio_input],
-                outputs=[detected_key_box, confidence_box, result_key_box, capo_box],
+                outputs=[filename_box, detected_key_box, confidence_box, result_key_box, capo_box],
                 api_name="process_upload",
             )
             steps_slider.change(
