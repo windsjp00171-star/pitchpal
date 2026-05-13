@@ -577,21 +577,27 @@ def parse_and_synth(text: str, key: str, bpm: int, octave: int,
         last_freq = freq
         segments.append(_tone(freq, beat * (1 + extra_beats), sr, timbre, rng))
 
-    if not segments:
+    has_chords = bool(chord_text and chord_text.strip())
+
+    if not segments and not has_chords:
         raise ValueError("沒有解析到任何音符，請確認輸入格式。")
 
-    melody_audio = np.concatenate(segments)
+    if segments:
+        melody_audio = np.concatenate(segments)
+    else:
+        melody_audio = np.zeros(0, dtype=np.float32)
 
-    # Mix in chords if provided
-    if chord_text and chord_text.strip():
+    if has_chords:
         chord_audio = _synth_chord_sequence(chord_text, bpm, sr, rng)
-        # Align lengths
-        ml, cl = len(melody_audio), len(chord_audio)
-        if cl < ml:
-            chord_audio = np.pad(chord_audio, (0, ml - cl))
-        elif cl > ml:
-            melody_audio = np.pad(melody_audio, (0, cl - ml))
-        audio = melody_audio * 0.72 + chord_audio
+        if len(melody_audio) == 0:
+            audio = chord_audio
+        else:
+            ml, cl = len(melody_audio), len(chord_audio)
+            if cl < ml:
+                chord_audio = np.pad(chord_audio, (0, ml - cl))
+            elif cl > ml:
+                melody_audio = np.pad(melody_audio, (0, cl - ml))
+            audio = melody_audio * 0.72 + chord_audio
     else:
         audio = melody_audio
 
@@ -640,13 +646,19 @@ def _submit_feedback(file, detected, conf_str, corrected, notes):
 
 
 def _gen_melody(text, key, bpm, octave, timbre, chord_text):
-    if not text or not text.strip():
-        return None, "請先輸入旋律。"
+    has_melody = bool(text and text.strip())
+    has_chords = bool(chord_text and chord_text.strip())
+    if not has_melody and not has_chords:
+        return None, "請輸入旋律或和弦進行。"
     try:
-        path = parse_and_synth(text, key, int(bpm), int(octave), timbre, chord_text or "")
-        has_chords = bool(chord_text and chord_text.strip())
-        suffix = "（含和弦）" if has_chords else ""
-        return path, f"生成完成{suffix}｜調性：{key}，BPM：{bpm}，音色：{timbre}"
+        path = parse_and_synth(text or "", key, int(bpm), int(octave), timbre, chord_text or "")
+        if has_melody and has_chords:
+            suffix = "旋律 + 和弦"
+        elif has_chords:
+            suffix = "和弦進行"
+        else:
+            suffix = "旋律"
+        return path, f"生成完成（{suffix}）｜調性：{key}，BPM：{bpm}，音色：{timbre}"
     except Exception as e:
         return None, f"生成失敗：{e}"
 
