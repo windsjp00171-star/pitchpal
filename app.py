@@ -384,58 +384,69 @@ MELODY_KEY_ROOTS = {
 MELODY_KEYS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
 
-def _tone_piano(freq: float, duration: float, sr: int = 22050) -> np.ndarray:
+def _lowpass(audio: np.ndarray, sr: int, cutoff: float = 3500.0) -> np.ndarray:
+    from scipy.signal import butter, sosfilt
+    sos = butter(4, cutoff / (sr / 2), btype="low", output="sos")
+    return sosfilt(sos, audio).astype(np.float32)
+
+
+def _tone_piano(freq: float, duration: float, sr: int, rng: np.random.Generator) -> np.ndarray:
     n = int(sr * duration)
     if n == 0:
         return np.zeros(0, dtype=np.float32)
+    # Slight random detuning ±4 cents for natural feel
+    detune = 1.0 + rng.uniform(-0.002, 0.002)
+    f = freq * detune
     t = np.linspace(0, duration, n, endpoint=False)
-    # Rich harmonic series with piano-like amplitude ratios
-    harmonics = [(1, 1.0), (2, 0.50), (3, 0.25), (4, 0.12),
-                 (5, 0.06), (6, 0.03), (7, 0.02), (8, 0.01)]
-    wave = sum(amp * np.sin(2 * np.pi * freq * h * t) for h, amp in harmonics)
-    # Short percussive attack + exponential decay (piano characteristic)
-    atk = min(int(0.005 * sr), n)
-    decay = np.exp(-4.0 * np.linspace(0, 1, n))
+    # Warm harmonics — roll off quickly above 3rd partial
+    harmonics = [(1, 1.0), (2, 0.40), (3, 0.15), (4, 0.06), (5, 0.02)]
+    wave = sum(amp * np.sin(2 * np.pi * f * h * t) for h, amp in harmonics)
+    # Percussive attack + exponential decay
+    atk = min(int(0.012 * sr), n)
+    decay = np.exp(-3.5 * np.linspace(0, 1, n))
     env = decay.astype(np.float32)
     env[:atk] *= np.linspace(0, 1, atk)
-    # Brief fade at very end to avoid clicks
-    fade = min(int(0.01 * sr), n)
+    fade = min(int(0.015 * sr), n)
     env[n - fade:] *= np.linspace(1, 0, fade)
-    return (wave * env * 0.35).astype(np.float32)
+    # Random velocity variation ±12%
+    vel = rng.uniform(0.88, 1.12)
+    return (wave * env * 0.40 * vel).astype(np.float32)
 
 
-def _tone_guitar(freq: float, duration: float, sr: int = 22050) -> np.ndarray:
-    """Karplus-Strong plucked string synthesis."""
+def _tone_guitar(freq: float, duration: float, sr: int, rng: np.random.Generator) -> np.ndarray:
+    """Karplus-Strong plucked string."""
     period = max(1, int(sr / freq))
     n = int(sr * duration)
     if n == 0:
         return np.zeros(0, dtype=np.float32)
-    rng = np.random.default_rng(int(freq * 1000) % (2**31))
     buf = rng.uniform(-1.0, 1.0, period).astype(np.float64)
     out = np.empty(n, dtype=np.float64)
+    # Slightly randomised decay coefficient for naturalness
+    coeff = rng.uniform(0.994, 0.998)
     for i in range(n):
         out[i] = buf[i % period]
-        buf[i % period] = 0.996 * 0.5 * (buf[i % period] + buf[(i + 1) % period])
-    # Fade out at end to avoid clicks
+        buf[i % period] = coeff * 0.5 * (buf[i % period] + buf[(i + 1) % period])
     fade = min(int(0.02 * sr), n)
     out[n - fade:] *= np.linspace(1, 0, fade)
-    return (out * 0.7).astype(np.float32)
+    vel = rng.uniform(0.85, 1.15)
+    return (out * 0.65 * vel).astype(np.float32)
 
 
-def _tone(freq: float, duration: float, sr: int = 22050, timbre: str = "鋼琴") -> np.ndarray:
+def _tone(freq: float, duration: float, sr: int, timbre: str, rng: np.random.Generator) -> np.ndarray:
     if timbre == "吉他":
-        return _tone_guitar(freq, duration, sr)
-    return _tone_piano(freq, duration, sr)
+        return _tone_guitar(freq, duration, sr, rng)
+    return _tone_piano(freq, duration, sr, rng)
 
 
-def _rest(duration: float, sr: int = 22050) -> np.ndarray:
+def _rest(duration: float, sr: int) -> np.ndarray:
     return np.zeros(int(sr * duration), dtype=np.float32)
 
 
 def parse_and_synth(text: str, key: str, bpm: int, octave: int, timbre: str = "鋼琴") -> str:
-    sr = 22050
+    sr = 44100
     beat = 60.0 / bpm
     root_midi = MELODY_KEY_ROOTS.get(key, 60) + (octave - 4) * 12
+    rng = np.random.default_rng(42)
 
     tokens = text.replace("|", " ").split()
     segments: list[np.ndarray] = []
@@ -448,7 +459,7 @@ def parse_and_synth(text: str, key: str, bpm: int, octave: int, timbre: str = "�
         # Standalone dash = extend previous note
         if tok.lstrip("-") == "" and last_freq is not None:
             extra = len(tok)
-            segments.append(_tone(last_freq, beat * extra, sr, timbre))
+            segments.append(_tone(last_freq, beat * extra, sr, timbre, rng))
             continue
 
         # Rest
@@ -479,12 +490,17 @@ def parse_and_synth(text: str, key: str, bpm: int, octave: int, timbre: str = "�
         midi = root_midi + semitone + oct_shift * 12
         freq = 440.0 * (2 ** ((midi - 69) / 12))
         last_freq = freq
-        segments.append(_tone(freq, beat * (1 + extra_beats), sr, timbre))
+        segments.append(_tone(freq, beat * (1 + extra_beats), sr, timbre, rng))
 
     if not segments:
         raise ValueError("沒有解析到任何音符，請確認輸入格式。")
 
     audio = np.concatenate(segments)
+    audio = _lowpass(audio, sr, cutoff=3500.0)
+    # Normalise to 90% peak to avoid clipping
+    peak = np.max(np.abs(audio))
+    if peak > 0:
+        audio = audio / peak * 0.9
     fd, out_path = tempfile.mkstemp(suffix=".wav")
     os.close(fd)
     sf.write(out_path, audio, sr)
