@@ -644,4 +644,4 @@ _填入正確調性後按「回報修正」即可，不需要登入。_""")
             )
 
 if __name__ == "__main__":
-    demo.launch(inbrowser=True)
+    demo.launch(show_api=False, inbrowser=True)
