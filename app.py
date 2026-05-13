@@ -383,6 +383,90 @@ MELODY_KEY_ROOTS = {
 
 MELODY_KEYS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
+# Chord parsing — roots ordered longest-first to avoid C matching C# prefix
+_CHORD_ROOTS = [
+    ("C#", 1), ("Db", 1), ("D#", 3), ("Eb", 3), ("F#", 6), ("Gb", 6),
+    ("G#", 8), ("Ab", 8), ("A#", 10), ("Bb", 10),
+    ("C", 0), ("D", 2), ("E", 4), ("F", 5), ("G", 7), ("A", 9), ("B", 11),
+]
+# Intervals (semitones) for each chord quality suffix
+_CHORD_QUALITIES: dict[str, list[int]] = {
+    "maj7": [0, 4, 7, 11], "maj9": [0, 4, 7, 11, 14],
+    "M7":   [0, 4, 7, 11],
+    "m7b5": [0, 3, 6, 10], "ø":    [0, 3, 6, 10],
+    "add9": [0, 4, 7, 14], "add2": [0, 2, 4, 7],
+    "sus4": [0, 5, 7],     "sus2": [0, 2, 7], "sus": [0, 5, 7],
+    "dim7": [0, 3, 6, 9],  "dim":  [0, 3, 6],
+    "aug":  [0, 4, 8],
+    "m7":   [0, 3, 7, 10], "m9":  [0, 3, 7, 10, 14],
+    "7":    [0, 4, 7, 10], "9":   [0, 4, 7, 10, 14],
+    "2":    [0, 2, 4, 7],  "²":   [0, 2, 4, 7],
+    "m":    [0, 3, 7],
+    "":     [0, 4, 7],
+}
+
+
+def _parse_chord_token(tok: str) -> list[int] | None:
+    """Return list of MIDI notes for a chord token, or None if unrecognised."""
+    # Ignore slash bass note (G/B → G)
+    tok = tok.split("/")[0]
+    root_semi = None
+    quality_str = tok
+    for name, semi in _CHORD_ROOTS:
+        if tok.startswith(name):
+            root_semi = semi
+            quality_str = tok[len(name):]
+            break
+    if root_semi is None:
+        return None
+    intervals = _CHORD_QUALITIES.get(quality_str, _CHORD_QUALITIES[""])
+    # Voicing: root one octave lower (C3), chord tones in C4 range
+    bass = 48 + root_semi          # C3 = 48
+    upper = [60 + root_semi + iv for iv in intervals]
+    # Clamp upper notes to a singable range
+    upper = [n - 12 if n > 76 else n for n in upper]
+    return [bass] + upper
+
+
+def _synth_chord_block(midi_notes: list[int], duration: float,
+                       sr: int, rng: np.random.Generator) -> np.ndarray:
+    n = int(sr * duration)
+    mixed = np.zeros(n, dtype=np.float64)
+    for midi in midi_notes:
+        freq = 440.0 * (2 ** ((midi - 69) / 12))
+        mixed += _tone_piano(freq, duration, sr, rng).astype(np.float64)
+    peak = np.max(np.abs(mixed))
+    if peak > 0:
+        mixed /= peak
+    return (mixed * 0.28).astype(np.float32)
+
+
+def _synth_chord_sequence(text: str, bpm: int, sr: int,
+                          rng: np.random.Generator) -> np.ndarray:
+    beat = 60.0 / bpm
+    tokens = text.replace("|", " ").split()
+    segments: list[np.ndarray] = []
+    last_notes: list[int] | None = None
+    silence = lambda: np.zeros(int(sr * beat), dtype=np.float32)
+
+    for tok in tokens:
+        if not tok:
+            continue
+        if tok == "-":
+            if last_notes:
+                segments.append(_synth_chord_block(last_notes, beat, sr, rng))
+            else:
+                segments.append(silence())
+            continue
+        notes = _parse_chord_token(tok)
+        if notes is None:
+            segments.append(silence())
+            continue
+        last_notes = notes
+        segments.append(_synth_chord_block(notes, beat, sr, rng))
+
+    return np.concatenate(segments) if segments else np.zeros(0, dtype=np.float32)
+
 
 def _lowpass(audio: np.ndarray, sr: int, cutoff: float = 3500.0) -> np.ndarray:
     from scipy.signal import butter, sosfilt
@@ -442,7 +526,8 @@ def _rest(duration: float, sr: int) -> np.ndarray:
     return np.zeros(int(sr * duration), dtype=np.float32)
 
 
-def parse_and_synth(text: str, key: str, bpm: int, octave: int, timbre: str = "鋼琴") -> str:
+def parse_and_synth(text: str, key: str, bpm: int, octave: int,
+                    timbre: str = "鋼琴", chord_text: str = "") -> str:
     sr = 44100
     beat = 60.0 / bpm
     root_midi = MELODY_KEY_ROOTS.get(key, 60) + (octave - 4) * 12
@@ -495,9 +580,22 @@ def parse_and_synth(text: str, key: str, bpm: int, octave: int, timbre: str = "�
     if not segments:
         raise ValueError("沒有解析到任何音符，請確認輸入格式。")
 
-    audio = np.concatenate(segments)
-    audio = _lowpass(audio, sr, cutoff=3500.0)
-    # Normalise to 90% peak to avoid clipping
+    melody_audio = np.concatenate(segments)
+
+    # Mix in chords if provided
+    if chord_text and chord_text.strip():
+        chord_audio = _synth_chord_sequence(chord_text, bpm, sr, rng)
+        # Align lengths
+        ml, cl = len(melody_audio), len(chord_audio)
+        if cl < ml:
+            chord_audio = np.pad(chord_audio, (0, ml - cl))
+        elif cl > ml:
+            melody_audio = np.pad(melody_audio, (0, cl - ml))
+        audio = melody_audio * 0.72 + chord_audio
+    else:
+        audio = melody_audio
+
+    audio = _lowpass(audio.astype(np.float32), sr, cutoff=3500.0)
     peak = np.max(np.abs(audio))
     if peak > 0:
         audio = audio / peak * 0.9
@@ -508,7 +606,7 @@ def parse_and_synth(text: str, key: str, bpm: int, octave: int, timbre: str = "�
 
 
 JIANPU_HELP = """
-**輸入格式說明**
+**旋律格式**
 | 輸入 | 意思 |
 |---|---|
 | `1` – `7` | 基本音（Do–Ti） |
@@ -519,10 +617,14 @@ JIANPU_HELP = """
 | `0` | 休止符 |
 | `|` | 小節線（忽略） |
 
-**範例（遠超過諸天 Intro，A調）**
-```
-6 6 6 7 7 7 7 6 | 4# 4# 4# 2 2 2 1# 1#
-```
+**和弦格式（選填）**
+每個 token = 一拍，`-` 延續上一個和弦，`|` 忽略
+
+支援：`C` `Cm` `C7` `Cm7` `Cmaj7` `Csus` `Csus2` `Cdim` `Caug` `C²` `G/B`
+
+**範例（遠超過諸天 Intro，G調）**
+旋律：`5 6 7 5 3 - - - | 7 5 6 - | 4# 5 6 4# 2 - | 6 4# 5 -`
+和弦：`C - - - Em7 - D - - - G/B - Em7 - D -`
 """
 
 def _submit_feedback(file, detected, conf_str, corrected, notes):
@@ -537,12 +639,14 @@ def _submit_feedback(file, detected, conf_str, corrected, notes):
     return submit_feedback(filename, detected, corrected, conf, notes)
 
 
-def _gen_melody(text, key, bpm, octave, timbre):
+def _gen_melody(text, key, bpm, octave, timbre, chord_text):
     if not text or not text.strip():
         return None, "請先輸入旋律。"
     try:
-        path = parse_and_synth(text, key, int(bpm), int(octave), timbre)
-        return path, f"生成完成｜調性：{key}，BPM：{bpm}，音色：{timbre}"
+        path = parse_and_synth(text, key, int(bpm), int(octave), timbre, chord_text or "")
+        has_chords = bool(chord_text and chord_text.strip())
+        suffix = "（含和弦）" if has_chords else ""
+        return path, f"生成完成{suffix}｜調性：{key}，BPM：{bpm}，音色：{timbre}"
     except Exception as e:
         return None, f"生成失敗：{e}"
 
@@ -777,15 +881,20 @@ _填入正確調性後按「回報修正」即可，不需要登入。_""")
             with gr.Row():
                 with gr.Column(scale=1):
                     melody_input = gr.Textbox(
-                        label="輸入旋律（簡譜）",
-                        placeholder="6 6 6 7 7 7 7 6 | 4# 4# 4# 2 2 2 1# 1#",
-                        lines=4,
+                        label="旋律（簡譜）",
+                        placeholder="5 6 7 5 3 - - - | 7 5 6 - | 4# 5 6 4# 2 - | 6 4# 5 -",
+                        lines=3,
+                    )
+                    chord_input = gr.Textbox(
+                        label="和弦進行（選填，每 token = 一拍，- 延續）",
+                        placeholder="C - - - Em7 - D - - - G/B - Em7 - D -",
+                        lines=2,
                     )
                     with gr.Row():
                         melody_key = gr.Dropdown(
                             label="調性（1 = ?）",
                             choices=MELODY_KEYS,
-                            value="A",
+                            value="G",
                             scale=1,
                         )
                         melody_bpm = gr.Slider(
@@ -818,7 +927,8 @@ _填入正確調性後按「回報修正」即可，不需要登入。_""")
 
             melody_btn.click(
                 fn=_gen_melody,
-                inputs=[melody_input, melody_key, melody_bpm, melody_octave, melody_timbre],
+                inputs=[melody_input, melody_key, melody_bpm, melody_octave,
+                        melody_timbre, chord_input],
                 outputs=[melody_output, melody_status],
                 api_name="gen_melody",
             )
