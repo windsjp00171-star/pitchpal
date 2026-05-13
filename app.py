@@ -503,9 +503,10 @@ with gr.Blocks(title="PitchPal — 音樂 Key 辨別與移調工具", css=CSS) a
             gr.Markdown("上傳音頻，自動偵測調性，調整半音數後下載移調結果。")
             with gr.Row():
                 with gr.Column(scale=1):
-                    audio_input = gr.File(
-                        label="上傳音頻 / 影片",
-                        file_types=[".mp3", ".wav", ".m4a", ".mp4", ".ogg", ".flac"],
+                    audio_input = gr.Audio(
+                        label="上傳音頻（mp3 / wav / m4a / flac）",
+                        type="filepath",
+                        sources=["upload"],
                     )
                     gr.Markdown(UPLOAD_NOTE)
                     with gr.Row():
@@ -573,22 +574,26 @@ _填入正確調性後按「回報修正」即可，不需要登入。_""")
                 fn=process_upload,
                 inputs=[audio_input],
                 outputs=[detected_key_box, confidence_box, result_key_box, capo_box],
+                api_name="process_upload",
             )
             steps_slider.change(
                 fn=on_slider_change,
                 inputs=[detected_key_box, steps_slider],
                 outputs=[result_key_box, capo_box],
+                api_name="on_slider_change",
             )
             transpose_btn.click(
                 fn=transpose_audio,
                 inputs=[audio_input, detected_key_box, steps_slider, output_fmt_radio],
                 outputs=[audio_output, status_box],
+                api_name="transpose_audio",
             )
             feedback_btn.click(
                 fn=_submit_feedback,
                 inputs=[audio_input, detected_key_box, confidence_box,
                         feedback_key, feedback_notes],
                 outputs=[feedback_status],
+                api_name="submit_feedback",
             )
 
         # ── Tab 2：旋律試聽 ───────────────────────────────────────────────────
@@ -635,6 +640,7 @@ _填入正確調性後按「回報修正」即可，不需要登入。_""")
                 fn=_gen_melody,
                 inputs=[melody_input, melody_key, melody_bpm, melody_octave],
                 outputs=[melody_output, melody_status],
+                api_name="gen_melody",
             )
 
 if __name__ == "__main__":
