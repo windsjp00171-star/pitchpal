@@ -547,7 +547,7 @@ def _gen_melody(text, key, bpm, octave, timbre):
         return None, f"生成失敗：{e}"
 
 
-def download_youtube(url: str):
+def download_youtube(url: str, cookies_file: str | None = None):
     import traceback
     if not url or not url.strip():
         return None, "—", "—", "", "", "請輸入 YouTube 連結。"
@@ -555,28 +555,61 @@ def download_youtube(url: str):
         import yt_dlp
     except ImportError:
         return None, "—", "—", "", "", "yt-dlp 未安裝，請聯絡管理員。"
+
+    # Try progressively more permissive client strategies
+    strategies = [
+        {"extractor_args": {"youtube": {"player_client": ["ios"]}}},
+        {"extractor_args": {"youtube": {"player_client": ["android"]}}},
+        {"extractor_args": {"youtube": {"player_client": ["web"]}}},
+    ]
+
+    tmpdir = tempfile.mkdtemp()
+    out_template = os.path.join(tmpdir, "%(id)s.%(ext)s")
+
+    base_opts = {
+        "format": "bestaudio/best",
+        "outtmpl": out_template,
+        "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "wav"}],
+        "quiet": True,
+        "no_warnings": True,
+        "socket_timeout": 30,
+    }
+    if cookies_file and os.path.exists(cookies_file):
+        base_opts["cookiefile"] = cookies_file
+        print(f"[pitchpal] using cookies: {cookies_file}")
+
+    last_err = None
+    info = None
+    for strategy in strategies:
+        try:
+            ydl_opts = {**base_opts, **strategy}
+            client = strategy["extractor_args"]["youtube"]["player_client"][0]
+            print(f"[pitchpal] yt-dlp trying client={client}: {url!r}")
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+            break
+        except Exception as e:
+            last_err = e
+            print(f"[pitchpal] client={client} failed: {e}")
+            continue
+
+    if info is None:
+        msg = str(last_err)
+        if "Sign in" in msg or "age" in msg.lower():
+            msg = "此影片需要登入或有年齡限制。請匯出瀏覽器 cookies.txt 後上傳再試。"
+        elif "Private" in msg or "private" in msg:
+            msg = "此影片為私人影片，無法下載。"
+        elif "available" in msg.lower() or "geographic" in msg.lower():
+            msg = "此影片在當前地區不可用（地區限制）。"
+        else:
+            msg = f"所有下載方式均失敗：{msg}"
+        return None, "—", "—", "", "", f"❌ {msg}"
+
     try:
-        tmpdir = tempfile.mkdtemp()
-        out_template = os.path.join(tmpdir, "%(id)s.%(ext)s")
-        ydl_opts = {
-            "format": "bestaudio/best",
-            "outtmpl": out_template,
-            "postprocessors": [{
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": "wav",
-            }],
-            "quiet": True,
-            "no_warnings": True,
-            "socket_timeout": 30,
-        }
-        print(f"[pitchpal] yt-dlp download: {url!r}")
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            title = info.get("title", "（未知）")
-            duration = info.get("duration", 0)
-            if duration and duration > 900:
-                return None, "—", "—", "", "", f"影片超過 15 分鐘（{duration//60} 分），請換較短的片段。"
-            video_id = info.get("id", "audio")
+        title = info.get("title", "（未知）")
+        duration = info.get("duration", 0)
+        if duration and duration > 900:
+            return None, "—", "—", "", "", f"影片超過 15 分鐘（{duration//60} 分），請換較短的片段。"
 
         audio_path = None
         for f in os.listdir(tmpdir):
@@ -592,15 +625,8 @@ def download_youtube(url: str):
         capo = capo_suggestions(rkey)
         return audio_path, key, f"{conf}%", rkey, capo, f"✅ 下載完成：《{title}》｜偵測調性：{key}"
     except Exception as e:
-        print(f"[pitchpal] download_youtube error:\n{traceback.format_exc()}")
-        msg = str(e)
-        if "Sign in" in msg or "age" in msg.lower():
-            msg = "此影片需要登入或有年齡限制，無法下載。"
-        elif "Private" in msg or "private" in msg:
-            msg = "此影片為私人影片，無法下載。"
-        elif "available" in msg.lower():
-            msg = "此影片在當前地區不可用。"
-        return None, "—", "—", "", "", f"下載失敗：{msg}"
+        print(f"[pitchpal] post-download error:\n{traceback.format_exc()}")
+        return None, "—", "—", "", "", f"下載成功但處理失敗：{e}"
 
 
 UPLOAD_NOTE = """
@@ -633,6 +659,17 @@ with gr.Blocks(title="PitchPal — 音樂 Key 辨別與移調工具", css=CSS) a
                             interactive=False,
                             show_label=False,
                         )
+                        with gr.Accordion("遇到下載限制？上傳 cookies.txt", open=False):
+                            gr.Markdown(
+                                "若遇到「需要登入」或「年齡限制」錯誤，"
+                                "可用瀏覽器擴充套件（如 **Get cookies.txt LOCALLY**）"
+                                "匯出 YouTube 的 cookies.txt，上傳後再試。"
+                            )
+                            yt_cookies_file = gr.File(
+                                label="cookies.txt（選填）",
+                                file_types=[".txt"],
+                                type="filepath",
+                            )
                     audio_input = gr.Audio(
                         label="或直接上傳音頻（mp3 / wav / m4a / flac）",
                         type="filepath",
@@ -703,7 +740,7 @@ _填入正確調性後按「回報修正」即可，不需要登入。_""")
 
             yt_btn.click(
                 fn=download_youtube,
-                inputs=[yt_url_box],
+                inputs=[yt_url_box, yt_cookies_file],
                 outputs=[audio_input, detected_key_box, confidence_box,
                          result_key_box, capo_box, yt_status_box],
                 api_name="download_youtube",
