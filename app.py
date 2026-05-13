@@ -442,28 +442,25 @@ def _synth_chord_block(midi_notes: list[int], duration: float,
 
 
 def _synth_chord_sequence(text: str, bpm: int, sr: int,
-                          rng: np.random.Generator) -> np.ndarray:
+                          rng: np.random.Generator,
+                          beats_per_bar: int = 4) -> np.ndarray:
+    """Bar-based chord sequence: 'C Em7 | D | G/B | Em7 D'
+    Chords within a bar share beats evenly."""
     beat = 60.0 / bpm
-    tokens = text.replace("|", " ").split()
+    bars = text.split("|")
     segments: list[np.ndarray] = []
-    last_notes: list[int] | None = None
-    silence = lambda: np.zeros(int(sr * beat), dtype=np.float32)
 
-    for tok in tokens:
-        if not tok:
+    for bar in bars:
+        chords = [t for t in bar.split() if t]
+        if not chords:
             continue
-        if tok == "-":
-            if last_notes:
-                segments.append(_synth_chord_block(last_notes, beat, sr, rng))
+        dur = beat * beats_per_bar / len(chords)
+        for tok in chords:
+            notes = _parse_chord_token(tok)
+            if notes:
+                segments.append(_synth_chord_block(notes, dur, sr, rng))
             else:
-                segments.append(silence())
-            continue
-        notes = _parse_chord_token(tok)
-        if notes is None:
-            segments.append(silence())
-            continue
-        last_notes = notes
-        segments.append(_synth_chord_block(notes, beat, sr, rng))
+                segments.append(np.zeros(int(sr * dur), dtype=np.float32))
 
     return np.concatenate(segments) if segments else np.zeros(0, dtype=np.float32)
 
@@ -527,7 +524,8 @@ def _rest(duration: float, sr: int) -> np.ndarray:
 
 
 def parse_and_synth(text: str, key: str, bpm: int, octave: int,
-                    timbre: str = "鋼琴", chord_text: str = "") -> str:
+                    timbre: str = "鋼琴", chord_text: str = "",
+                    beats_per_bar: int = 4) -> str:
     sr = 44100
     beat = 60.0 / bpm
     root_midi = MELODY_KEY_ROOTS.get(key, 60) + (octave - 4) * 12
@@ -588,7 +586,7 @@ def parse_and_synth(text: str, key: str, bpm: int, octave: int,
         melody_audio = np.zeros(0, dtype=np.float32)
 
     if has_chords:
-        chord_audio = _synth_chord_sequence(chord_text, bpm, sr, rng)
+        chord_audio = _synth_chord_sequence(chord_text, bpm, sr, rng, beats_per_bar)
         if len(melody_audio) == 0:
             audio = chord_audio
         else:
@@ -624,13 +622,14 @@ JIANPU_HELP = """
 | `|` | 小節線（忽略） |
 
 **和弦格式（選填）**
-每個 token = 一拍，`-` 延續上一個和弦，`|` 忽略
+用 `|` 分小節，同一小節的和弦**自動平均分拍**
 
 支援：`C` `Cm` `C7` `Cm7` `Cmaj7` `Csus` `Csus2` `Cdim` `Caug` `C²` `G/B`
 
-**範例（遠超過諸天 Intro，G調）**
+**範例（遠超過諸天 Intro，G調，4/4）**
 旋律：`5 6 7 5 3 - - - | 7 5 6 - | 4# 5 6 4# 2 - | 6 4# 5 -`
-和弦：`C - - - Em7 - D - - - G/B - Em7 - D -`
+和弦：`C Em7 | D | G/B | Em7 D`
+（第一小節 C 2拍 + Em7 2拍，第二小節 D 4拍，以此類推）
 """
 
 def _submit_feedback(file, detected, conf_str, corrected, notes):
@@ -645,20 +644,22 @@ def _submit_feedback(file, detected, conf_str, corrected, notes):
     return submit_feedback(filename, detected, corrected, conf, notes)
 
 
-def _gen_melody(text, key, bpm, octave, timbre, chord_text):
+def _gen_melody(text, key, bpm, octave, timbre, chord_text, time_sig):
     has_melody = bool(text and text.strip())
     has_chords = bool(chord_text and chord_text.strip())
     if not has_melody and not has_chords:
         return None, "請輸入旋律或和弦進行。"
+    beats_per_bar = 3 if time_sig == "3/4" else 4
     try:
-        path = parse_and_synth(text or "", key, int(bpm), int(octave), timbre, chord_text or "")
+        path = parse_and_synth(text or "", key, int(bpm), int(octave), timbre,
+                               chord_text or "", beats_per_bar)
         if has_melody and has_chords:
             suffix = "旋律 + 和弦"
         elif has_chords:
             suffix = "和弦進行"
         else:
             suffix = "旋律"
-        return path, f"生成完成（{suffix}）｜調性：{key}，BPM：{bpm}，音色：{timbre}"
+        return path, f"生成完成（{suffix}）｜{time_sig}，調性：{key}，BPM：{bpm}"
     except Exception as e:
         return None, f"生成失敗：{e}"
 
@@ -898,8 +899,8 @@ _填入正確調性後按「回報修正」即可，不需要登入。_""")
                         lines=3,
                     )
                     chord_input = gr.Textbox(
-                        label="和弦進行（選填，每 token = 一拍，- 延續）",
-                        placeholder="C - - - Em7 - D - - - G/B - Em7 - D -",
+                        label="和弦進行（選填）",
+                        placeholder="C Em7 | D | G/B | Em7 D",
                         lines=2,
                     )
                     with gr.Row():
@@ -925,11 +926,19 @@ _填入正確調性後按「回報修正」即可，不需要登入。_""")
                             value=4,
                             scale=1,
                         )
-                    melody_timbre = gr.Radio(
-                        label="音色",
-                        choices=["鋼琴", "吉他"],
-                        value="鋼琴",
-                    )
+                    with gr.Row():
+                        melody_timbre = gr.Radio(
+                            label="音色",
+                            choices=["鋼琴", "吉他"],
+                            value="鋼琴",
+                            scale=2,
+                        )
+                        time_sig_radio = gr.Radio(
+                            label="拍號",
+                            choices=["4/4", "3/4"],
+                            value="4/4",
+                            scale=1,
+                        )
                     melody_btn = gr.Button("生成旋律", variant="primary", size="lg")
 
                 with gr.Column(scale=1):
@@ -940,7 +949,7 @@ _填入正確調性後按「回報修正」即可，不需要登入。_""")
             melody_btn.click(
                 fn=_gen_melody,
                 inputs=[melody_input, melody_key, melody_bpm, melody_octave,
-                        melody_timbre, chord_input],
+                        melody_timbre, chord_input, time_sig_radio],
                 outputs=[melody_output, melody_status],
                 api_name="gen_melody",
             )
