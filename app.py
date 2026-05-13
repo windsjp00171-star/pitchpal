@@ -1,4 +1,18 @@
 import gradio as gr
+
+# Patch gradio_client 5.9.x bug: boolean JSON schemas crash _json_schema_to_python_type.
+# The fix: return "Any" when schema is not a dict (True/False are valid JSON Schema booleans).
+try:
+    import gradio_client.utils as _gcu
+    _orig_schema_fn = _gcu._json_schema_to_python_type
+    def _safe_schema_fn(schema, defs=None):
+        if not isinstance(schema, dict):
+            return "Any"
+        return _orig_schema_fn(schema, defs)
+    _gcu._json_schema_to_python_type = _safe_schema_fn
+except Exception:
+    pass
+
 import librosa
 import librosa.effects
 import soundfile as sf
