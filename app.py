@@ -295,6 +295,116 @@ def transpose_audio(file, detected_key, steps, output_fmt, progress=gr.Progress(
                 os.remove(p)
 
 
+# ── 簡譜合成 ──────────────────────────────────────────────────────────────────
+
+JIANPU_INTERVALS = {"1": 0, "2": 2, "3": 4, "4": 5, "5": 7, "6": 9, "7": 11}
+
+MELODY_KEY_ROOTS = {
+    "C": 60, "C#": 61, "D": 62, "D#": 63, "E": 64,
+    "F": 65, "F#": 66, "G": 67, "G#": 68, "A": 69, "A#": 70, "B": 71,
+}
+
+MELODY_KEYS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
+
+def _tone(freq: float, duration: float, sr: int = 22050) -> np.ndarray:
+    n = int(sr * duration)
+    if n == 0:
+        return np.zeros(0, dtype=np.float32)
+    t = np.linspace(0, duration, n, endpoint=False)
+    wave = (np.sin(2 * np.pi * freq * t) * 0.6
+            + np.sin(2 * np.pi * freq * 2 * t) * 0.25
+            + np.sin(2 * np.pi * freq * 3 * t) * 0.1)
+    # ADSR envelope
+    atk = min(int(0.01 * sr), n)
+    rel = min(int(0.08 * sr), n)
+    env = np.ones(n, dtype=np.float32)
+    env[:atk] = np.linspace(0, 1, atk)
+    env[n - rel:] *= np.linspace(1, 0, rel)
+    return (wave * env * 0.5).astype(np.float32)
+
+
+def _rest(duration: float, sr: int = 22050) -> np.ndarray:
+    return np.zeros(int(sr * duration), dtype=np.float32)
+
+
+def parse_and_synth(text: str, key: str, bpm: int, octave: int) -> str:
+    sr = 22050
+    beat = 60.0 / bpm
+    root_midi = MELODY_KEY_ROOTS.get(key, 60) + (octave - 4) * 12
+
+    tokens = text.replace("|", " ").split()
+    segments: list[np.ndarray] = []
+    last_freq: float | None = None
+
+    for tok in tokens:
+        if not tok:
+            continue
+
+        # Standalone dash = extend previous note
+        if tok.lstrip("-") == "" and last_freq is not None:
+            extra = len(tok)
+            segments.append(_tone(last_freq, beat * extra, sr))
+            continue
+
+        # Rest
+        if tok[0] == "0":
+            extra = tok.count("-")
+            segments.append(_rest(beat * (1 + extra), sr))
+            last_freq = None
+            continue
+
+        # Note token: digit [#] [' or ,]* [-]*
+        i = 0
+        if tok[i] not in JIANPU_INTERVALS:
+            continue
+        note_char = tok[i]; i += 1
+
+        sharp = False
+        if i < len(tok) and tok[i] == "#":
+            sharp = True; i += 1
+
+        oct_shift = 0
+        while i < len(tok) and tok[i] in ("'", ","):
+            oct_shift += 1 if tok[i] == "'" else -1
+            i += 1
+
+        extra_beats = tok[i:].count("-")
+
+        semitone = JIANPU_INTERVALS[note_char] + (1 if sharp else 0)
+        midi = root_midi + semitone + oct_shift * 12
+        freq = 440.0 * (2 ** ((midi - 69) / 12))
+        last_freq = freq
+        segments.append(_tone(freq, beat * (1 + extra_beats), sr))
+
+    if not segments:
+        raise ValueError("沒有解析到任何音符，請確認輸入格式。")
+
+    audio = np.concatenate(segments)
+    fd, out_path = tempfile.mkstemp(suffix=".wav")
+    os.close(fd)
+    sf.write(out_path, audio, sr)
+    return out_path
+
+
+JIANPU_HELP = """
+**輸入格式說明**
+| 輸入 | 意思 |
+|---|---|
+| `1` – `7` | 基本音（Do–Ti） |
+| `4#` | 升半音（F# 等） |
+| `1'` | 高八度 |
+| `1,` | 低八度 |
+| `1--` | 延音（共 3 拍） |
+| `0` | 休止符 |
+| `\|` | 小節線（忽略） |
+
+**範例（遠超過諸天 Intro，A調）**
+```
+6 6 6 7 7 7 7 6 | 4# 4# 4# 2 2 2 1# 1#
+```
+"""
+
 UPLOAD_NOTE = """
 > **支援格式：** MP3、WAV、M4A、FLAC（上限 50 MB）｜MP4 影片（上限 200 MB，自動擷取音軌）
 > **長度上限：** 10 分鐘｜建議上傳純音頻以加快處理速度
@@ -302,74 +412,131 @@ UPLOAD_NOTE = """
 
 with gr.Blocks(title="PitchPal — 音樂 Key 辨別與移調工具", css=CSS) as demo:
     gr.Markdown("# 🎵 PitchPal — 音樂 Key 辨別與移調工具")
-    gr.Markdown("上傳音頻，自動偵測調性，調整半音數後下載移調結果。")
 
-    with gr.Row():
-        with gr.Column(scale=1):
-            audio_input = gr.File(
-                label="上傳音頻 / 影片",
-                file_types=[".mp3", ".wav", ".m4a", ".mp4", ".ogg", ".flac"],
-            )
-            gr.Markdown(UPLOAD_NOTE)
+    with gr.Tabs():
+
+        # ── Tab 1：移調工具 ───────────────────────────────────────────────────
+        with gr.Tab("🎚️ 移調工具"):
+            gr.Markdown("上傳音頻，自動偵測調性，調整半音數後下載移調結果。")
             with gr.Row():
-                detected_key_box = gr.Textbox(
-                    label="原曲調性",
-                    interactive=False,
-                    placeholder="上傳後自動顯示…",
-                    scale=3,
-                )
-                confidence_box = gr.Textbox(
-                    label="信心度",
-                    interactive=False,
-                    value="—",
-                    scale=1,
-                )
-            steps_slider = gr.Slider(
-                label="移調半音數（負數 = 降Key，正數 = 升Key）",
-                minimum=-12,
-                maximum=12,
-                step=1,
-                value=0,
-            )
-            result_key_box = gr.Textbox(
-                label="移調後調性",
-                interactive=False,
-                placeholder="—",
-            )
-            capo_box = gr.Textbox(
-                label="🎸 Capo 建議（吉他）",
-                interactive=False,
-                lines=3,
-                elem_id="capo-box",
-            )
-            output_fmt_radio = gr.Radio(
-                label="輸出格式",
-                choices=OUTPUT_FORMATS,
-                value="WAV",
-            )
-            transpose_btn = gr.Button("開始移調", variant="primary", size="lg")
+                with gr.Column(scale=1):
+                    audio_input = gr.File(
+                        label="上傳音頻 / 影片",
+                        file_types=[".mp3", ".wav", ".m4a", ".mp4", ".ogg", ".flac"],
+                    )
+                    gr.Markdown(UPLOAD_NOTE)
+                    with gr.Row():
+                        detected_key_box = gr.Textbox(
+                            label="原曲調性",
+                            interactive=False,
+                            placeholder="上傳後自動顯示…",
+                            scale=3,
+                        )
+                        confidence_box = gr.Textbox(
+                            label="信心度",
+                            interactive=False,
+                            value="—",
+                            scale=1,
+                        )
+                    steps_slider = gr.Slider(
+                        label="移調半音數（負數 = 降Key，正數 = 升Key）",
+                        minimum=-12,
+                        maximum=12,
+                        step=1,
+                        value=0,
+                    )
+                    result_key_box = gr.Textbox(
+                        label="移調後調性",
+                        interactive=False,
+                        placeholder="—",
+                    )
+                    capo_box = gr.Textbox(
+                        label="🎸 Capo 建議（吉他）",
+                        interactive=False,
+                        lines=3,
+                        elem_id="capo-box",
+                    )
+                    output_fmt_radio = gr.Radio(
+                        label="輸出格式",
+                        choices=OUTPUT_FORMATS,
+                        value="WAV",
+                    )
+                    transpose_btn = gr.Button("開始移調", variant="primary", size="lg")
 
-        with gr.Column(scale=1):
-            status_box = gr.Textbox(label="狀態訊息", interactive=False)
-            audio_output = gr.Audio(label="移調後音頻", type="filepath")
+                with gr.Column(scale=1):
+                    status_box = gr.Textbox(label="狀態訊息", interactive=False)
+                    audio_output = gr.Audio(label="移調後音頻", type="filepath")
 
-    audio_input.change(
-        fn=process_upload,
-        inputs=[audio_input],
-        outputs=[detected_key_box, confidence_box, result_key_box, capo_box],
-    )
+            audio_input.change(
+                fn=process_upload,
+                inputs=[audio_input],
+                outputs=[detected_key_box, confidence_box, result_key_box, capo_box],
+            )
+            steps_slider.change(
+                fn=on_slider_change,
+                inputs=[detected_key_box, steps_slider],
+                outputs=[result_key_box, capo_box],
+            )
+            transpose_btn.click(
+                fn=transpose_audio,
+                inputs=[audio_input, detected_key_box, steps_slider, output_fmt_radio],
+                outputs=[audio_output, status_box],
+            )
 
-    steps_slider.change(
-        fn=on_slider_change,
-        inputs=[detected_key_box, steps_slider],
-        outputs=[result_key_box, capo_box],
-    )
+        # ── Tab 2：旋律試聽 ───────────────────────────────────────────────────
+        with gr.Tab("🎼 旋律試聽"):
+            gr.Markdown("輸入簡譜數字，選調性與速度，生成旋律音頻確認音調。")
+            with gr.Row():
+                with gr.Column(scale=1):
+                    melody_input = gr.Textbox(
+                        label="輸入旋律（簡譜）",
+                        placeholder="6 6 6 7 7 7 7 6 | 4# 4# 4# 2 2 2 1# 1#",
+                        lines=4,
+                    )
+                    with gr.Row():
+                        melody_key = gr.Dropdown(
+                            label="調性（1 = ?）",
+                            choices=MELODY_KEYS,
+                            value="A",
+                            scale=1,
+                        )
+                        melody_bpm = gr.Slider(
+                            label="BPM",
+                            minimum=40,
+                            maximum=200,
+                            step=1,
+                            value=80,
+                            scale=2,
+                        )
+                        melody_octave = gr.Slider(
+                            label="八度（4 = 中央）",
+                            minimum=2,
+                            maximum=6,
+                            step=1,
+                            value=4,
+                            scale=1,
+                        )
+                    melody_btn = gr.Button("生成旋律", variant="primary", size="lg")
 
-    transpose_btn.click(
-        fn=transpose_audio,
-        inputs=[audio_input, detected_key_box, steps_slider, output_fmt_radio],
-        outputs=[audio_output, status_box],
-    )
+                with gr.Column(scale=1):
+                    gr.Markdown(JIANPU_HELP)
+                    melody_status = gr.Textbox(label="狀態", interactive=False)
+                    melody_output = gr.Audio(label="旋律音頻", type="filepath")
+
+            def _gen_melody(text, key, bpm, octave):
+                if not text.strip():
+                    return None, "請先輸入旋律。"
+                try:
+                    path = parse_and_synth(text, key, int(bpm), int(octave))
+                    return path, f"生成完成｜調性：{key}，BPM：{bpm}"
+                except Exception as e:
+                    return None, f"生成失敗：{e}"
+
+            melody_btn.click(
+                fn=_gen_melody,
+                inputs=[melody_input, melody_key, melody_bpm, melody_octave],
+                outputs=[melody_output, melody_status],
+            )
 
 if __name__ == "__main__":
     demo.launch(inbrowser=True)
