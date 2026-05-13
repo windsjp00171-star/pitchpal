@@ -105,6 +105,16 @@ def _prepare_audio(file_path: str) -> tuple[str, bool]:
     return file_path, False
 
 
+def _ks_scores(chroma_mean: np.ndarray) -> tuple[list, list]:
+    major_profile = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09,
+                               2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
+    minor_profile = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53,
+                               2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
+    major = [np.corrcoef(np.roll(major_profile, i), chroma_mean)[0, 1] for i in range(12)]
+    minor = [np.corrcoef(np.roll(minor_profile, i), chroma_mean)[0, 1] for i in range(12)]
+    return major, minor
+
+
 def detect_key(audio_path: str):
     y, sr = librosa.load(audio_path, mono=True)
     if len(y) == 0:
@@ -114,21 +124,32 @@ def detect_key(audio_path: str):
     if duration > MAX_DURATION_SEC:
         raise ValueError(f"音頻長度 {duration/60:.1f} 分鐘，超過上限 {MAX_DURATION_SEC//60} 分鐘。")
 
-    chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
-    chroma_mean = chroma.mean(axis=1)
+    # 1. 裁掉首尾靜音
+    y, _ = librosa.effects.trim(y, top_db=20)
 
-    major_profile = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09,
-                               2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
-    minor_profile = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53,
-                               2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
+    # 2. 跳過前後各 10%，分析中間 80%（避免前奏/尾奏干擾）
+    n = len(y)
+    margin = int(n * 0.10)
+    y_core = y[margin: n - margin] if n - 2 * margin > sr else y
 
-    major_scores = [np.corrcoef(np.roll(major_profile, i), chroma_mean)[0, 1] for i in range(12)]
-    minor_scores = [np.corrcoef(np.roll(minor_profile, i), chroma_mean)[0, 1] for i in range(12)]
+    # 3. 多窗口投票：把核心段切成 4 塊，各自算 KS，再平均
+    segments = np.array_split(y_core, 4)
+    all_major = np.zeros(12)
+    all_minor = np.zeros(12)
+    for seg in segments:
+        if len(seg) < sr // 4:
+            continue
+        # chroma_cens 比 chroma_cqt 更抗雜訊
+        chroma = librosa.feature.chroma_cens(y=seg, sr=sr)
+        cm = chroma.mean(axis=1)
+        maj, minor = _ks_scores(cm)
+        all_major += np.array(maj)
+        all_minor += np.array(minor)
 
-    best_major_idx = int(np.argmax(major_scores))
-    best_minor_idx = int(np.argmax(minor_scores))
-    best_major_score = major_scores[best_major_idx]
-    best_minor_score = minor_scores[best_minor_idx]
+    best_major_idx = int(np.argmax(all_major))
+    best_minor_idx = int(np.argmax(all_minor))
+    best_major_score = all_major[best_major_idx]
+    best_minor_score = all_minor[best_minor_idx]
 
     if best_major_score >= best_minor_score:
         root = MAJOR_KEYS[best_major_idx]
@@ -142,10 +163,10 @@ def detect_key(audio_path: str):
     display = KEY_DISPLAY.get(root, root)
     key_str = f"{display} {mode}"
 
-    all_scores = major_scores + minor_scores
+    all_scores = list(all_major) + list(all_minor)
     others = [s for s in all_scores if s != best_score]
-    margin = best_score - float(np.mean(others))
-    confidence = int(min(100, max(0, margin / 0.35 * 100)))
+    margin_score = best_score - float(np.mean(others))
+    confidence = int(min(100, max(0, margin_score / (0.35 * 4) * 100)))
 
     return key_str, confidence
 
