@@ -547,6 +547,62 @@ def _gen_melody(text, key, bpm, octave, timbre):
         return None, f"生成失敗：{e}"
 
 
+def download_youtube(url: str):
+    import traceback
+    if not url or not url.strip():
+        return None, "—", "—", "", "", "請輸入 YouTube 連結。"
+    try:
+        import yt_dlp
+    except ImportError:
+        return None, "—", "—", "", "", "yt-dlp 未安裝，請聯絡管理員。"
+    try:
+        tmpdir = tempfile.mkdtemp()
+        out_template = os.path.join(tmpdir, "%(id)s.%(ext)s")
+        ydl_opts = {
+            "format": "bestaudio/best",
+            "outtmpl": out_template,
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "wav",
+            }],
+            "quiet": True,
+            "no_warnings": True,
+            "socket_timeout": 30,
+        }
+        print(f"[pitchpal] yt-dlp download: {url!r}")
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            title = info.get("title", "（未知）")
+            duration = info.get("duration", 0)
+            if duration and duration > 900:
+                return None, "—", "—", "", "", f"影片超過 15 分鐘（{duration//60} 分），請換較短的片段。"
+            video_id = info.get("id", "audio")
+
+        audio_path = None
+        for f in os.listdir(tmpdir):
+            if f.endswith(".wav"):
+                audio_path = os.path.join(tmpdir, f)
+                break
+        if not audio_path or not os.path.exists(audio_path):
+            return None, "—", "—", "", "", "音頻擷取失敗，請確認影片可以正常播放。"
+
+        print(f"[pitchpal] yt download ok → {audio_path}")
+        key, conf = detect_key(audio_path)
+        rkey = result_key(key, 0)
+        capo = capo_suggestions(rkey)
+        return audio_path, key, f"{conf}%", rkey, capo, f"✅ 下載完成：《{title}》｜偵測調性：{key}"
+    except Exception as e:
+        print(f"[pitchpal] download_youtube error:\n{traceback.format_exc()}")
+        msg = str(e)
+        if "Sign in" in msg or "age" in msg.lower():
+            msg = "此影片需要登入或有年齡限制，無法下載。"
+        elif "Private" in msg or "private" in msg:
+            msg = "此影片為私人影片，無法下載。"
+        elif "available" in msg.lower():
+            msg = "此影片在當前地區不可用。"
+        return None, "—", "—", "", "", f"下載失敗：{msg}"
+
+
 UPLOAD_NOTE = """
 > **支援格式：** MP3、WAV、M4A、FLAC（上限 50 MB）｜MP4 影片（上限 200 MB，自動擷取音軌）
 > **長度上限：** 10 分鐘｜建議上傳純音頻以加快處理速度
@@ -559,11 +615,26 @@ with gr.Blocks(title="PitchPal — 音樂 Key 辨別與移調工具", css=CSS) a
 
         # ── Tab 1：移調工具 ───────────────────────────────────────────────────
         with gr.Tab("🎚️ 移調工具"):
-            gr.Markdown("上傳音頻，自動偵測調性，調整半音數後下載移調結果。")
+            gr.Markdown("上傳音頻或貼上 YouTube 連結，自動偵測調性，調整半音數後下載移調結果。")
             with gr.Row():
                 with gr.Column(scale=1):
+                    with gr.Group():
+                        gr.Markdown("**▶ 從 YouTube 下載**")
+                        with gr.Row():
+                            yt_url_box = gr.Textbox(
+                                label="YouTube 連結",
+                                placeholder="https://www.youtube.com/watch?v=...",
+                                scale=4,
+                                show_label=False,
+                            )
+                            yt_btn = gr.Button("下載並分析", variant="secondary", scale=1)
+                        yt_status_box = gr.Textbox(
+                            label="下載狀態",
+                            interactive=False,
+                            show_label=False,
+                        )
                     audio_input = gr.Audio(
-                        label="上傳音頻（mp3 / wav / m4a / flac）",
+                        label="或直接上傳音頻（mp3 / wav / m4a / flac）",
                         type="filepath",
                         sources=["upload"],
                     )
@@ -630,6 +701,13 @@ _填入正確調性後按「回報修正」即可，不需要登入。_""")
                     feedback_btn = gr.Button("回報修正", variant="secondary")
                     feedback_status = gr.Textbox(label="回報狀態", interactive=False)
 
+            yt_btn.click(
+                fn=download_youtube,
+                inputs=[yt_url_box],
+                outputs=[audio_input, detected_key_box, confidence_box,
+                         result_key_box, capo_box, yt_status_box],
+                api_name="download_youtube",
+            )
             audio_input.change(
                 fn=process_upload,
                 inputs=[audio_input],
