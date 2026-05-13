@@ -458,7 +458,7 @@ JIANPU_HELP = """
 | `1,` | 低八度 |
 | `1--` | 延音（共 3 拍） |
 | `0` | 休止符 |
-| `\|` | 小節線（忽略） |
+| `|` | 小節線（忽略） |
 
 **範例（遠超過諸天 Intro，A調）**
 ```
@@ -644,4 +644,4 @@ _填入正確調性後按「回報修正」即可，不需要登入。_""")
             )
 
 if __name__ == "__main__":
-    demo.launch(ssr=False, inbrowser=True)
+    demo.launch(inbrowser=True)
