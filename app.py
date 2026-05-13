@@ -8,8 +8,48 @@ import tempfile
 import os
 import shutil
 
+# ── Supabase 連線（讀環境變數，HF Spaces Secrets 設定）─────────────────────
+_sb_client = None
+
+def _get_sb():
+    global _sb_client
+    if _sb_client is not None:
+        return _sb_client
+    url = os.environ.get("SUPABASE_URL", "")
+    key = os.environ.get("SUPABASE_KEY", "")
+    if url and key:
+        try:
+            from supabase import create_client
+            _sb_client = create_client(url, key)
+        except Exception:
+            pass
+    return _sb_client
+
+
+def submit_feedback(filename: str, detected: str, corrected: str,
+                    confidence: int, notes: str) -> str:
+    if not corrected:
+        return "請先選擇正確調性。"
+    if corrected == detected:
+        return "你選的調性跟偵測結果一樣，不需要回報。"
+    sb = _get_sb()
+    if sb is None:
+        return "⚠️ 資料庫未設定，反饋無法儲存。"
+    try:
+        sb.table("key_feedback").insert({
+            "filename": filename or None,
+            "detected": detected,
+            "corrected": corrected,
+            "confidence": confidence if isinstance(confidence, int) else None,
+            "notes": notes or None,
+        }).execute()
+        return f"感謝回報！已記錄：{detected} → {corrected}"
+    except Exception as e:
+        return f"儲存失敗：{e}"
+
 MAJOR_KEYS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 MINOR_KEYS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+ALL_KEYS = [f"{k} 大調" for k in MAJOR_KEYS] + [f"{k} 小調" for k in MINOR_KEYS]
 
 KEY_DISPLAY = {
     "C#": "C#/Db",
@@ -488,6 +528,21 @@ with gr.Blocks(title="PitchPal — 音樂 Key 辨別與移調工具", css=CSS) a
                     status_box = gr.Textbox(label="狀態訊息", interactive=False)
                     audio_output = gr.Audio(label="移調後音頻", type="filepath")
 
+                    gr.Markdown("---")
+                    gr.Markdown("**偵測結果不正確？幫我們改善準確率：**")
+                    feedback_key = gr.Dropdown(
+                        label="正確調性",
+                        choices=ALL_KEYS,
+                        value=None,
+                    )
+                    feedback_notes = gr.Textbox(
+                        label="備註（選填）",
+                        placeholder="例如：這首歌有轉調…",
+                        lines=1,
+                    )
+                    feedback_btn = gr.Button("回報修正", variant="secondary")
+                    feedback_status = gr.Textbox(label="回報狀態", interactive=False)
+
             audio_input.change(
                 fn=process_upload,
                 inputs=[audio_input],
@@ -502,6 +557,24 @@ with gr.Blocks(title="PitchPal — 音樂 Key 辨別與移調工具", css=CSS) a
                 fn=transpose_audio,
                 inputs=[audio_input, detected_key_box, steps_slider, output_fmt_radio],
                 outputs=[audio_output, status_box],
+            )
+
+            def _submit(file, detected, conf_str, corrected, notes):
+                filename = ""
+                if file:
+                    p = _resolve_path(file)
+                    filename = os.path.basename(p) if p else ""
+                try:
+                    conf = int(conf_str.replace("%", ""))
+                except Exception:
+                    conf = None
+                return submit_feedback(filename, detected, corrected, conf, notes)
+
+            feedback_btn.click(
+                fn=_submit,
+                inputs=[audio_input, detected_key_box, confidence_box,
+                        feedback_key, feedback_notes],
+                outputs=[feedback_status],
             )
 
         # ── Tab 2：旋律試聽 ───────────────────────────────────────────────────
