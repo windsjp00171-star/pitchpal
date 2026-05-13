@@ -233,8 +233,6 @@ def _convert_to_mp3(wav_path: str) -> str:
 def transpose_audio(file, detected_key, steps, output_fmt, progress=gr.Progress()):
     if not file:
         return None, "請先上傳音頻檔案。"
-    if not detected_key or detected_key.startswith("偵測失敗") or detected_key.endswith("MB）。"):
-        return None, "請先成功上傳並偵測調性。"
 
     file_path = _resolve_path(file)
     if not file_path:
@@ -279,13 +277,14 @@ def transpose_audio(file, detected_key, steps, output_fmt, progress=gr.Progress(
             out_path = _convert_to_mp3(wav_path)
 
         progress(1.0, desc="完成！")
-        rkey = result_key(detected_key, steps)
         direction = f"+{steps}" if steps > 0 else str(steps)
-        msg = (
-            f"無移調，已輸出為 {output_fmt}。"
-            if steps == 0
-            else f"移調完成：{detected_key} → {rkey}（{direction} 個半音）｜格式：{output_fmt}"
-        )
+        if steps == 0:
+            msg = f"無移調，已輸出為 {output_fmt}。"
+        elif detected_key and not detected_key.startswith("偵測失敗"):
+            rkey = result_key(detected_key, steps)
+            msg = f"移調完成：{detected_key} → {rkey}（{direction} 個半音）｜格式：{output_fmt}"
+        else:
+            msg = f"移調完成：{direction} 個半音｜格式：{output_fmt}"
         return out_path, msg
 
     except Exception as e:
