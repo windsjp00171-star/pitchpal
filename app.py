@@ -538,12 +538,13 @@ with gr.Blocks(title="PitchPal — 音樂 Key 辨別與移調工具", css=CSS) a
                             value="—",
                             scale=1,
                         )
-                    steps_slider = gr.Slider(
+                    steps_slider = gr.Number(
                         label="移調半音數（負數 = 降Key，正數 = 升Key）",
                         minimum=-12,
                         maximum=12,
                         step=1,
                         value=0,
+                        precision=0,
                     )
                     result_key_box = gr.Textbox(
                         label="移調後調性",
