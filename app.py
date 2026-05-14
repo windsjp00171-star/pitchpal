@@ -270,7 +270,16 @@ _KS_MAJOR = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09,
                        2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
 _KS_MINOR = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53,
                        2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
-_LOWPASS_SOS = butter(4, 3500.0 / (44100 / 2), btype="low", output="sos")
+_LOWPASS_SOS = butter(4, 8000.0 / (44100 / 2), btype="low", output="sos")
+
+TIMBRE_CUTOFF = {
+    "鋼琴": 7000.0,
+    "吉他": 9000.0,
+    "長笛": 5000.0,
+    "管風琴": 6000.0,
+    "豎琴": 10000.0,
+    "小提琴": 7500.0,
+}
 _RNG = np.random.default_rng()
 
 
@@ -596,8 +605,8 @@ def _synth_chord_sequence(text: str, bpm: int, sr: int,
     return np.concatenate(segments) if segments else np.zeros(0, dtype=np.float32)
 
 
-def _lowpass(audio: np.ndarray, sr: int, cutoff: float = 3500.0) -> np.ndarray:
-    sos = _LOWPASS_SOS if (sr == 44100 and cutoff == 3500.0) else butter(4, cutoff / (sr / 2), btype="low", output="sos")
+def _lowpass(audio: np.ndarray, sr: int, cutoff: float = 8000.0) -> np.ndarray:
+    sos = _LOWPASS_SOS if (sr == 44100 and cutoff == 8000.0) else butter(4, cutoff / (sr / 2), btype="low", output="sos")
     return sosfilt(sos, audio).astype(np.float32)
 
 
@@ -838,7 +847,8 @@ def parse_and_synth(text: str, key: str, bpm: int, octave: int,
     else:
         audio = melody_audio
 
-    audio = _lowpass(audio.astype(np.float32), sr, cutoff=3500.0)
+    cutoff = TIMBRE_CUTOFF.get(timbre, 8000.0)
+    audio = _lowpass(audio.astype(np.float32), sr, cutoff=cutoff)
     peak = np.max(np.abs(audio))
     if peak > 0:
         audio = audio / peak * 0.9
@@ -1085,7 +1095,7 @@ def _play_note_with_mods(note_digit: str, key: str, octave: int,
     freq = 440.0 * (2 ** ((midi - 69) / 12))
     sr = 44100
     audio = _tone(freq, 0.8, sr, timbre, _RNG)
-    audio = _lowpass(audio, sr)
+    audio = _lowpass(audio, sr, cutoff=TIMBRE_CUTOFF.get(timbre, 8000.0))
     return _write_normalized(audio, sr)
 
 
