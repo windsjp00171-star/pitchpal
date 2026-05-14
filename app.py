@@ -106,8 +106,25 @@ CSS = """
 .mod-palette button   { min-width: 50px !important; font-size: 0.78em !important; padding: 5px 3px !important; }
 /* Capo monospace */
 #capo-box textarea { font-family: monospace; font-size: 0.9em; }
-/* Tabs warm underline */
-.tab-nav button.selected { border-bottom-color: #e6a817 !important; }
+/* Tabs */
+.tab-nav button {
+    border: 1px solid #d1d5db !important;
+    border-radius: 8px 8px 0 0 !important;
+    margin-right: 3px !important;
+    box-shadow: 0 -1px 4px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04) !important;
+    transition: box-shadow 0.12s, background 0.12s !important;
+}
+.tab-nav button:hover {
+    box-shadow: 0 -2px 8px rgba(0,0,0,0.13), 0 1px 3px rgba(0,0,0,0.07) !important;
+    background: #f9f6f0 !important;
+}
+.tab-nav button.selected {
+    border-bottom-color: transparent !important;
+    border-top: 2px solid #e6a817 !important;
+    box-shadow: 0 -3px 10px rgba(230,168,23,0.18), 0 1px 0 #fff !important;
+    background: #fff !important;
+    font-weight: 700 !important;
+}
 /* Button shadows */
 button.lg, button.primary {
     box-shadow: 0 3px 8px rgba(0,0,0,0.18), 0 1px 3px rgba(0,0,0,0.12) !important;
