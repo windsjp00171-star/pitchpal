@@ -108,6 +108,19 @@ CSS = """
 #capo-box textarea { font-family: monospace; font-size: 0.9em; }
 /* Tabs warm underline */
 .tab-nav button.selected { border-bottom-color: #e6a817 !important; }
+/* Button shadows */
+button.lg, button.primary {
+    box-shadow: 0 3px 8px rgba(0,0,0,0.18), 0 1px 3px rgba(0,0,0,0.12) !important;
+    transition: box-shadow 0.12s, transform 0.1s !important;
+}
+button.lg:hover, button.primary:hover {
+    box-shadow: 0 5px 14px rgba(0,0,0,0.22), 0 2px 5px rgba(0,0,0,0.14) !important;
+    transform: translateY(-1px) !important;
+}
+button.lg:active, button.primary:active {
+    box-shadow: 0 1px 3px rgba(0,0,0,0.15) !important;
+    transform: translateY(1px) !important;
+}
 footer { display: none !important; }
 """
 
