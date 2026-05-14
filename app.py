@@ -843,13 +843,23 @@ def parse_and_synth(text: str, key: str, bpm: int, octave: int,
             oct_shift += 1 if tok[i] == "'" else -1
             i += 1
 
-        extra_beats = tok[i:].count("-")
+        suffix = tok[i:]
+        underscores = suffix.count("_")
+        extra_beats = suffix.count("-")
+
+        # _ = 八分音符 (0.5拍), __ = 十六分音符 (0.25拍), 無 = 四分音符 (1拍+延長)
+        if underscores >= 2:
+            duration = beat * 0.25
+        elif underscores == 1:
+            duration = beat * 0.5
+        else:
+            duration = beat * (1 + extra_beats)
 
         semitone = JIANPU_INTERVALS[note_char] + (1 if sharp else -1 if flat else 0)
         midi = root_midi + semitone + oct_shift * 12
         freq = 440.0 * (2 ** ((midi - 69) / 12))
         last_freq = freq
-        segments.append(_tone(freq, beat * (1 + extra_beats), sr, timbre, _RNG))
+        segments.append(_tone(freq, duration, sr, timbre, _RNG))
 
     has_chords = bool(chord_text and chord_text.strip())
 
@@ -900,6 +910,8 @@ JIANPU_HELP = """
 | `4#` | 升半音 | `4# 5 6` |
 | `1'` | 高八度（加一撇） | `5 6 7 1'` |
 | `1,` | 低八度（加一逗） | `3, 4, 5` |
+| `1_` | 八分音符（半拍） | `6_ 6_ 6_ 7_` |
+| `1__` | 十六分音符（¼拍） | `6__ 7__ 1_` |
 | `1--` | 延音，幾個 `-` = 幾拍 | `5---`（4拍） |
 | `0` | 休止符 | `1 2 0 3` |
 | `|` | 小節線（裝飾用，可省略） | |
