@@ -339,15 +339,13 @@ def transpose_audio(file, detected_key, steps, output_fmt):
         if steps == 0:
             y_shifted = y
         else:
+            # n_fft=8192 + bins_per_octave=24: highest quality librosa can offer
+            _ps = lambda ch: librosa.effects.pitch_shift(
+                ch, sr=sr, n_steps=steps, n_fft=8192, bins_per_octave=24)
             if y.ndim == 1:
-                y_shifted = librosa.effects.pitch_shift(
-                    y, sr=sr, n_steps=steps, n_fft=4096)
+                y_shifted = _ps(y)
             else:
-                y_shifted = np.stack([
-                    librosa.effects.pitch_shift(
-                        y[ch], sr=sr, n_steps=steps, n_fft=4096)
-                    for ch in range(y.shape[0])
-                ])
+                y_shifted = np.stack([_ps(y[ch]) for ch in range(y.shape[0])])
 
         wav_path = _write_wav(y_shifted, sr)
 
