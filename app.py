@@ -793,7 +793,7 @@ def _click_track(total_samples: int, bpm: int, sr: int,
         click[pos:end] += burst[:end - pos]
         pos += beat_samples
         beat_idx += 1
-    return click * 0.35
+    return click * 0.18
 
 
 def parse_and_synth(text: str, key: str, bpm: int, octave: int,
