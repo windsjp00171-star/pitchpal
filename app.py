@@ -22,7 +22,48 @@ import tempfile
 import traceback
 import os
 import shutil
+import threading
+import time
+import atexit
 from scipy.signal import butter, sosfilt, lfilter
+
+# ── Temp file cleanup ────────────────────────────────────────────────────────
+_tmp_lock = threading.Lock()
+_tmp_paths: list[tuple[float, str]] = []   # (created_time, path)
+
+def _reg_tmp(path: str) -> str:
+    with _tmp_lock:
+        _tmp_paths.append((time.time(), path))
+    return path
+
+def _sweep_tmp(max_age: float = 7200.0):
+    cutoff = time.time() - max_age
+    with _tmp_lock:
+        survivors = []
+        for ts, p in _tmp_paths:
+            if ts < cutoff:
+                try: os.remove(p)
+                except OSError: pass
+            else:
+                survivors.append((ts, p))
+        _tmp_paths[:] = survivors
+
+@atexit.register
+def _cleanup_all_tmp():
+    with _tmp_lock:
+        for _, p in _tmp_paths:
+            try: os.remove(p)
+            except OSError: pass
+
+def _start_sweep_thread():
+    def _loop():
+        while True:
+            time.sleep(3600)
+            _sweep_tmp()
+    t = threading.Thread(target=_loop, daemon=True)
+    t.start()
+
+_start_sweep_thread()
 
 # ── Supabase 連線（讀環境變數，HF Spaces Secrets 設定）─────────────────────
 _sb_client = None
@@ -139,6 +180,23 @@ button.lg:active, button.primary:active {
     transform: translateY(1px) !important;
 }
 footer { display: none !important; }
+/* Mobile responsive */
+@media (max-width: 768px) {
+    .gradio-container { padding: 6px !important; }
+    /* Stack two-column rows vertically */
+    .gr-row { flex-wrap: wrap !important; }
+    .gr-row > .gr-column { min-width: 100% !important; flex: 1 1 100% !important; }
+    /* Palette buttons: wrap and shrink */
+    .chord-palette, .note-palette, .mod-palette {
+        flex-wrap: wrap !important;
+        gap: 4px !important;
+    }
+    .chord-palette button { min-width: 44px !important; flex: 1 1 auto !important; }
+    .note-palette button  { min-width: 36px !important; flex: 1 1 auto !important; }
+    .mod-palette button   { min-width: 52px !important; flex: 1 1 auto !important; }
+    /* Bigger touch targets */
+    button { min-height: 40px !important; }
+}
 """
 
 
@@ -354,7 +412,7 @@ def _write_wav(y: np.ndarray, sr: int, stem: str = "audio") -> str:
     fd, wav_path = tempfile.mkstemp(suffix=f"__{stem}.wav")
     os.close(fd)
     sf.write(wav_path, y.T if y.ndim > 1 else y, sr)
-    return wav_path
+    return _reg_tmp(wav_path)
 
 
 def _convert_to_mp3(wav_path: str, stem: str = "audio") -> str:
@@ -364,7 +422,7 @@ def _convert_to_mp3(wav_path: str, stem: str = "audio") -> str:
         ["ffmpeg", "-i", wav_path, "-q:a", "2", out_path, "-y"],
         capture_output=True, check=True,
     )
-    return out_path
+    return _reg_tmp(out_path)
 
 
 def transpose_audio(file, detected_key, steps, output_fmt):
@@ -665,6 +723,7 @@ def parse_and_synth(text: str, key: str, bpm: int, octave: int,
         audio = audio / peak * 0.9
     fd, out_path = tempfile.mkstemp(suffix=".wav")
     os.close(fd)
+    _reg_tmp(out_path)
     sf.write(out_path, audio, sr)
     return out_path
 
@@ -776,6 +835,7 @@ def play_chord_audio(chord_name: str) -> str | None:
         audio = audio / peak * 0.85
     fd, path = tempfile.mkstemp(suffix=".wav")
     os.close(fd)
+    _reg_tmp(path)
     sf.write(path, audio, sr)
     return path
 
@@ -872,6 +932,7 @@ def _play_note_with_mods(note_digit: str, key: str, octave: int,
         audio = audio / peak * 0.85
     fd, path = tempfile.mkstemp(suffix=".wav")
     os.close(fd)
+    _reg_tmp(path)
     sf.write(path, audio, sr)
     return path
 
@@ -901,22 +962,35 @@ def append_melody_modifier(melody_text: str, char: str) -> str:
     return melody_text.rstrip() + sep + char
 
 
+_YT_STRATEGIES = [
+    # (client, skip_webpage) — ordered by cloud-IP friendliness
+    ("tv_embedded", True),
+    ("mweb",        True),
+    ("ios",         False),
+    ("android",     False),
+    ("web",         False),
+]
+
+_YT_TIMEOUT_SEC = 90   # overall wall-clock limit for the entire download
+
+
+def _yt_download_worker(url: str, opts: dict, result: list):
+    """Run in a daemon thread; stores (info, exception) in result[0]."""
+    try:
+        import yt_dlp
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            result.append((ydl.extract_info(url, download=True), None))
+    except Exception as e:
+        result.append((None, e))
+
+
 def download_youtube(url: str, cookies_file: str | None = None):
     if not url or not url.strip():
         return None, "", "—", "—", "", "", "請輸入 YouTube 連結。"
     try:
-        import yt_dlp
+        import yt_dlp  # noqa: F401
     except ImportError:
         return None, "", "—", "—", "", "", "yt-dlp 未安裝，請聯絡管理員。"
-
-    # Try clients in order: tv_embedded and mweb bypass bot detection best on cloud IPs
-    strategies = [
-        {"extractor_args": {"youtube": {"player_client": ["tv_embedded"]}}},
-        {"extractor_args": {"youtube": {"player_client": ["mweb"]}}},
-        {"extractor_args": {"youtube": {"player_client": ["ios"]}}},
-        {"extractor_args": {"youtube": {"player_client": ["android"]}}},
-        {"extractor_args": {"youtube": {"player_client": ["web"]}}},
-    ]
 
     tmpdir = tempfile.mkdtemp()
     out_template = os.path.join(tmpdir, "%(id)s.%(ext)s")
@@ -927,7 +1001,10 @@ def download_youtube(url: str, cookies_file: str | None = None):
         "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "wav"}],
         "quiet": True,
         "no_warnings": True,
-        "socket_timeout": 60,
+        "noplaylist": True,
+        "socket_timeout": 20,
+        "retries": 2,
+        "fragment_retries": 2,
         "http_headers": {
             "User-Agent": (
                 "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
@@ -939,63 +1016,75 @@ def download_youtube(url: str, cookies_file: str | None = None):
         base_opts["cookiefile"] = cookies_file
         print(f"[pitchpal] using cookies: {cookies_file}")
 
-    last_err = None
     info = None
+    last_err = None
+
     try:
-        for strategy in strategies:
-            try:
-                ydl_opts = {**base_opts, **strategy}
-                client = strategy["extractor_args"]["youtube"]["player_client"][0]
-                print(f"[pitchpal] yt-dlp trying client={client}: {url!r}")
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=True)
+        deadline = time.time() + _YT_TIMEOUT_SEC
+        for client, skip_wp in _YT_STRATEGIES:
+            if time.time() > deadline:
+                last_err = Exception("整體下載超時（90 秒）")
                 break
-            except Exception as e:
-                last_err = e
-                print(f"[pitchpal] client={client} failed: {e}")
-                continue
+            extra: dict = {"extractor_args": {"youtube": {"player_client": [client]}}}
+            if skip_wp:
+                extra["extractor_args"]["youtube"]["skip"] = ["webpage"]
+            opts = {**base_opts, **extra}
+            result: list = []
+            t = threading.Thread(target=_yt_download_worker, args=(url, opts, result), daemon=True)
+            t.start()
+            remaining = max(1.0, deadline - time.time())
+            t.join(timeout=min(30.0, remaining))   # per-strategy cap 30s
+            if result:
+                got_info, err = result[0]
+                if got_info is not None:
+                    info = got_info
+                    break
+                last_err = err
+                print(f"[pitchpal] client={client} failed: {err}")
+            else:
+                last_err = Exception(f"client={client} 無回應（超時）")
+                print(f"[pitchpal] {last_err}")
 
         if info is None:
-            msg = str(last_err)
-            if "Sign in" in msg or "age" in msg.lower():
-                msg = "此影片需要登入或有年齡限制。請匯出瀏覽器 cookies.txt 後上傳再試。"
-            elif "Private" in msg or "private" in msg:
-                msg = "此影片為私人影片，無法下載。"
-            elif "available" in msg.lower() or "geographic" in msg.lower():
-                msg = "此影片在當前地區不可用（地區限制）。"
+            msg = str(last_err) if last_err else "未知錯誤"
+            if "Sign in" in msg or "age" in msg.lower() or "login" in msg.lower():
+                tip = "此影片需要登入或年齡限制。上傳瀏覽器 cookies.txt 後再試。"
+            elif "private" in msg.lower():
+                tip = "此影片為私人影片，無法存取。"
+            elif "geographic" in msg.lower() or "available" in msg.lower():
+                tip = "此影片有地區限制，伺服器所在地區無法存取。"
+            elif "超時" in msg or "無回應" in msg:
+                tip = f"連線超時（{msg}）。YouTube 在雲端伺服器上有封鎖，請改用 cookies.txt 或直接上傳音檔。"
             else:
-                msg = f"所有下載方式均失敗：{msg}"
-            return None, "", "—", "—", "", "", f"❌ {msg}"
+                tip = f"所有方式均失敗：{msg[:120]}"
+            return None, "", "—", "—", "", "", f"❌ {tip}"
 
         title = info.get("title", "（未知）")
         duration = info.get("duration", 0)
         if duration and duration > 900:
-            return None, "", "—", "—", "", "", f"影片超過 15 分鐘（{duration//60} 分），請換較短的片段。"
+            return None, "", "—", "—", "", "", f"影片超過 15 分鐘（{duration//60} 分），請改用較短片段。"
 
         audio_path = None
         for f in os.listdir(tmpdir):
             if f.endswith(".wav"):
                 audio_path = os.path.join(tmpdir, f)
                 break
-        if not audio_path or not os.path.exists(audio_path):
-            return None, "", "—", "—", "", "", "音頻擷取失敗，請確認影片可以正常播放。"
+        if not audio_path:
+            return None, "", "—", "—", "", "", "音頻擷取失敗，請確認影片包含音軌。"
 
-        print(f"[pitchpal] yt download ok → {audio_path}")
+        _reg_tmp(audio_path)
+        print(f"[pitchpal] yt ok → {audio_path}")
         key, conf = detect_key(audio_path)
         rkey = result_key(key, 0)
         capo = capo_suggestions(rkey)
-        return audio_path, title, key, f"{conf}%", rkey, capo, f"✅ 下載完成：《{title}》｜偵測調性：{key}"
+        return audio_path, title, key, f"{conf}%", rkey, capo, f"✅ 完成：《{title}》｜偵測調性：{key}"
 
     except Exception as e:
         print(f"[pitchpal] download_youtube error:\n{traceback.format_exc()}")
         return None, "", "—", "—", "", "", f"下載失敗：{e}"
     finally:
-        # Clean up tmpdir but keep the wav file if it was returned successfully
-        try:
-            if info is None:
-                shutil.rmtree(tmpdir, ignore_errors=True)
-        except Exception:
-            pass
+        if info is None:
+            shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 UPLOAD_NOTE = """
@@ -1144,6 +1233,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                 outputs=[audio_input, filename_box, detected_key_box, confidence_box,
                          result_key_box, capo_box, yt_status_box],
                 api_name="download_youtube",
+                show_progress="minimal",
             )
             audio_input.change(
                 fn=process_upload,
@@ -1151,6 +1241,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                 outputs=[filename_box, detected_key_box, confidence_box,
                          result_key_box, capo_box],
                 api_name="process_upload",
+                show_progress="minimal",
             )
             steps_slider.change(
                 fn=on_slider_change,
@@ -1163,6 +1254,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                 inputs=[audio_input, detected_key_box, steps_slider, output_fmt_radio],
                 outputs=[audio_output, status_box],
                 api_name="transpose_audio",
+                show_progress="full",
             )
             feedback_btn.click(
                 fn=_submit_feedback,
@@ -1277,6 +1369,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                         melody_timbre, chord_input, time_sig_radio],
                 outputs=[melody_output, melody_status],
                 api_name="gen_melody",
+                show_progress="minimal",
             )
 
             # Chord button labels update with key
