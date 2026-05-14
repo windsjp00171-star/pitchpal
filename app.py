@@ -690,9 +690,11 @@ def parse_and_synth(text: str, key: str, bpm: int, octave: int,
             continue
         note_char = tok[i]; i += 1
 
-        sharp = False
+        sharp = flat = False
         if i < len(tok) and tok[i] == "#":
             sharp = True; i += 1
+        elif i < len(tok) and tok[i] == "b":
+            flat = True; i += 1
 
         oct_shift = 0
         while i < len(tok) and tok[i] in ("'", ","):
@@ -701,7 +703,7 @@ def parse_and_synth(text: str, key: str, bpm: int, octave: int,
 
         extra_beats = tok[i:].count("-")
 
-        semitone = JIANPU_INTERVALS[note_char] + (1 if sharp else 0)
+        semitone = JIANPU_INTERVALS[note_char] + (1 if sharp else -1 if flat else 0)
         midi = root_midi + semitone + oct_shift * 12
         freq = 440.0 * (2 ** ((midi - 69) / 12))
         last_freq = freq
@@ -875,6 +877,8 @@ def _apply_quality_mod(chord: str, mod: str) -> str:
             is_minor = q.startswith("m") and "maj" not in q
             is_dim = "dim" in q
             break
+    if mod == "m":
+        return root + "m"
     if mod == "7":
         return root + ("m7" if is_minor else "dim7" if is_dim else "7")
     if mod == "maj7":
@@ -901,11 +905,15 @@ def add_barline_to_input(chord_text: str) -> str:
     return chord_text.rstrip() + " |"
 
 
-_MOD_INIT = {"sharp": False, "high": False, "low": False}
+_MOD_INIT = {"sharp": False, "flat": False, "high": False, "low": False}
 
 
 def _mod_sharp_btn(active: bool):
     return gr.Button("# 升 ✓" if active else "# 升",
+                     variant="primary" if active else "secondary", size="sm")
+
+def _mod_flat_btn(active: bool):
+    return gr.Button("b 降 ✓" if active else "b 降",
                      variant="primary" if active else "secondary", size="sm")
 
 def _mod_high_btn(active: bool):
@@ -918,8 +926,15 @@ def _mod_low_btn(active: bool):
 
 
 def toggle_sharp(state: dict):
-    new_state = {**state, "sharp": not state["sharp"]}
-    return new_state, _mod_sharp_btn(new_state["sharp"])
+    new_s = not state["sharp"]
+    new_state = {**state, "sharp": new_s, "flat": False if new_s else state["flat"]}
+    return new_state, _mod_sharp_btn(new_state["sharp"]), _mod_flat_btn(new_state["flat"])
+
+
+def toggle_flat(state: dict):
+    new_f = not state["flat"]
+    new_state = {**state, "flat": new_f, "sharp": False if new_f else state["sharp"]}
+    return new_state, _mod_sharp_btn(new_state["sharp"]), _mod_flat_btn(new_state["flat"])
 
 
 def toggle_high(state: dict):
@@ -934,7 +949,7 @@ def toggle_low(state: dict):
     return new_state, _mod_high_btn(new_state["high"]), _mod_low_btn(new_state["low"])
 
 
-_CQ_LABELS = ["基本", "7 藍調", "maj7 夢幻", "sus4 懸念", "add9 現代"]
+_CQ_LABELS = ["基本", "m 小調", "7 藍調", "maj7 夢幻", "sus4 懸念", "add9 現代"]
 
 
 def _cq_btn(label: str, active: bool):
@@ -955,10 +970,11 @@ def _play_note_with_mods(note_digit: str, key: str, octave: int,
     if note_digit == "0" or note_digit not in JIANPU_INTERVALS:
         return None
     sharp = state.get("sharp", False)
+    flat  = state.get("flat",  False)
     high  = state.get("high",  False)
     low   = state.get("low",   False)
     root_midi = MELODY_KEY_ROOTS.get(key, 60) + (int(octave) - 4) * 12
-    semitone = JIANPU_INTERVALS[note_digit] + (1 if sharp else 0)
+    semitone = JIANPU_INTERVALS[note_digit] + (1 if sharp else -1 if flat else 0)
     oct_shift = (1 if high else 0) - (1 if low else 0)
     midi = root_midi + semitone + oct_shift * 12
     freq = 440.0 * (2 ** ((midi - 69) / 12))
@@ -973,9 +989,10 @@ def _make_note_handler(digit: str):
         html = _audio_html(_play_note_with_mods(digit, key, int(octave), timbre, state))
         tok = "0" if digit == "0" else digit
         if digit != "0":
-            if state.get("sharp"): tok += "#"
-            if state.get("high"):  tok += "'"
-            if state.get("low"):   tok += ","
+            if state.get("sharp"):   tok += "#"
+            elif state.get("flat"):  tok += "b"
+            if state.get("high"):    tok += "'"
+            if state.get("low"):     tok += ","
         if mode == "加入輸入框":
             sep = " " if melody_text.strip() else ""
             new_text = melody_text.rstrip() + sep + tok
@@ -1321,10 +1338,16 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                         note_btn_6 = gr.Button("6", size="sm")
                         note_btn_7 = gr.Button("7", size="sm")
                         note_btn_0 = gr.Button("0 休", size="sm")
+                    gr.Markdown("<div style='font-size:0.72em;color:#9ca3af;margin:6px 0 2px'>半音</div>")
                     with gr.Row(elem_classes="mod-palette"):
-                        mod_sharp  = gr.Button("# 升",  size="sm", variant="secondary")
-                        mod_high   = gr.Button("' 高八", size="sm", variant="secondary")
-                        mod_low    = gr.Button(", 低八", size="sm", variant="secondary")
+                        mod_sharp = gr.Button("# 升",  size="sm", variant="secondary")
+                        mod_flat  = gr.Button("b 降",  size="sm", variant="secondary")
+                    gr.Markdown("<div style='font-size:0.72em;color:#9ca3af;margin:6px 0 2px'>八度</div>")
+                    with gr.Row(elem_classes="mod-palette"):
+                        mod_high  = gr.Button("' 高八", size="sm", variant="secondary")
+                        mod_low   = gr.Button(", 低八", size="sm", variant="secondary")
+                    gr.Markdown("<div style='font-size:0.72em;color:#9ca3af;margin:6px 0 2px'>節拍</div>")
+                    with gr.Row(elem_classes="mod-palette"):
                         mod_extend = gr.Button("- 延音", size="sm")
                         mod_bar_m  = gr.Button("| 小節", size="sm")
                     melody_input = gr.Textbox(
@@ -1344,12 +1367,16 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                             show_label=False, scale=2,
                         )
                     chord_quality_state = gr.State("基本")
+                    gr.Markdown("<div style='font-size:0.72em;color:#9ca3af;margin:6px 0 2px'>和弦色彩</div>")
                     with gr.Row(elem_classes="mod-palette"):
-                        cq_basic = gr.Button("基本 ✓", size="sm", variant="primary")
+                        cq_basic = gr.Button("基本 ✓",    size="sm", variant="primary")
+                        cq_m     = gr.Button("m 小調",    size="sm", variant="secondary")
                         cq_7     = gr.Button("7 藍調",    size="sm", variant="secondary")
                         cq_maj7  = gr.Button("maj7 夢幻", size="sm", variant="secondary")
                         cq_sus4  = gr.Button("sus4 懸念", size="sm", variant="secondary")
                         cq_add9  = gr.Button("add9 現代", size="sm", variant="secondary")
+                    gr.Markdown("<div style='font-size:0.72em;color:#9ca3af;margin:6px 0 2px'>節拍</div>")
+                    with gr.Row(elem_classes="mod-palette"):
                         barline_btn = gr.Button("| 小節線", size="sm")
                     _init_chords = get_diatonic_chords("G")
                     with gr.Row(elem_classes="chord-palette"):
@@ -1430,7 +1457,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
             )
 
             # Chord quality toggle buttons (single-select)
-            _cq_btns = [cq_basic, cq_7, cq_maj7, cq_sus4, cq_add9]
+            _cq_btns = [cq_basic, cq_m, cq_7, cq_maj7, cq_sus4, cq_add9]
             _cq_outputs = [chord_quality_state] + _cq_btns
             for _lbl, _cqb in zip(_CQ_LABELS, _cq_btns):
                 _cqb.click(
@@ -1439,11 +1466,16 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                     outputs=_cq_outputs,
                 )
 
-            # Toggle modifier buttons (sharp/high/low)
+            # Toggle modifier buttons (sharp/flat/high/low)
             mod_sharp.click(
                 fn=toggle_sharp,
                 inputs=[mod_state],
-                outputs=[mod_state, mod_sharp],
+                outputs=[mod_state, mod_sharp, mod_flat],
+            )
+            mod_flat.click(
+                fn=toggle_flat,
+                inputs=[mod_state],
+                outputs=[mod_state, mod_sharp, mod_flat],
             )
             mod_high.click(
                 fn=toggle_high,
