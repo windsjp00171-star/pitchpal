@@ -846,14 +846,17 @@ def parse_and_synth(text: str, key: str, bpm: int, octave: int,
         suffix = tok[i:]
         underscores = suffix.count("_")
         extra_beats = suffix.count("-")
+        dotted = "." in suffix
 
-        # _ = 八分音符 (0.5拍), __ = 十六分音符 (0.25拍), 無 = 四分音符 (1拍+延長)
+        # _ = 八分音符 (0.5拍), __ = 十六分音符 (0.25拍), . = 附點(×1.5), 無 = 四分音符
         if underscores >= 2:
             duration = beat * 0.25
         elif underscores == 1:
             duration = beat * 0.5
         else:
             duration = beat * (1 + extra_beats)
+        if dotted:
+            duration *= 1.5
 
         semitone = JIANPU_INTERVALS[note_char] + (1 if sharp else -1 if flat else 0)
         midi = root_midi + semitone + oct_shift * 12
@@ -1045,8 +1048,12 @@ def _apply_quality_mod(chord: str, mod: str) -> str:
         return root + "maj7"
     if mod == "sus4":
         return root + "sus4"
+    if mod == "sus2":
+        return root + "sus2"
     if mod == "add9":
         return root + ("m9" if is_minor else "add9")
+    if mod == "dim":
+        return root + "dim"
     return chord
 
 
@@ -1109,7 +1116,7 @@ def toggle_low(state: dict):
     return new_state, _mod_high_btn(new_state["high"]), _mod_low_btn(new_state["low"])
 
 
-_CQ_LABELS = ["基本", "m 小調", "m7 小七", "7 藍調", "maj7 夢幻", "sus4 懸念", "add9 現代"]
+_CQ_LABELS = ["基本", "m 小調", "m7 小七", "7 藍調", "maj7 大七", "sus4 掛四", "sus2 掛二", "add9 加九", "dim 減"]
 
 
 def _cq_btn(label: str, active: bool):
@@ -1506,10 +1513,13 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                     with gr.Row(elem_classes="mod-palette"):
                         mod_high  = gr.Button("' 高八", size="sm", variant="secondary")
                         mod_low   = gr.Button(", 低八", size="sm", variant="secondary")
-                    gr.Markdown("<div style='font-size:0.72em;color:#9ca3af;margin:6px 0 2px'>節拍</div>")
+                    gr.Markdown("<div style='font-size:0.72em;color:#9ca3af;margin:6px 0 2px'>時值</div>")
                     with gr.Row(elem_classes="mod-palette"):
-                        mod_extend = gr.Button("- 延音", size="sm")
-                        mod_bar_m  = gr.Button("| 小節", size="sm")
+                        mod_eighth  = gr.Button("_ 八分", size="sm")
+                        mod_sixteen = gr.Button("__ 十六", size="sm")
+                        mod_dot     = gr.Button(". 附點", size="sm")
+                        mod_extend  = gr.Button("- 延音", size="sm")
+                        mod_bar_m   = gr.Button("| 小節", size="sm")
                     melody_input = gr.Textbox(
                         label="數字簡譜",
                         placeholder="5 6 7 5 3 - - - | 7 5 6 -",
@@ -1531,10 +1541,14 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                     with gr.Row(elem_classes="mod-palette"):
                         cq_basic = gr.Button("基本 ✓",    size="sm", variant="primary")
                         cq_m     = gr.Button("m 小調",    size="sm", variant="secondary")
+                        cq_m7    = gr.Button("m7 小七",   size="sm", variant="secondary")
                         cq_7     = gr.Button("7 藍調",    size="sm", variant="secondary")
-                        cq_maj7  = gr.Button("maj7 夢幻", size="sm", variant="secondary")
-                        cq_sus4  = gr.Button("sus4 懸念", size="sm", variant="secondary")
-                        cq_add9  = gr.Button("add9 現代", size="sm", variant="secondary")
+                        cq_maj7  = gr.Button("maj7 大七", size="sm", variant="secondary")
+                    with gr.Row(elem_classes="mod-palette"):
+                        cq_sus4  = gr.Button("sus4 掛四", size="sm", variant="secondary")
+                        cq_sus2  = gr.Button("sus2 掛二", size="sm", variant="secondary")
+                        cq_add9  = gr.Button("add9 加九", size="sm", variant="secondary")
+                        cq_dim   = gr.Button("dim 減",    size="sm", variant="secondary")
                     gr.Markdown("<div style='font-size:0.72em;color:#9ca3af;margin:6px 0 2px'>節拍</div>")
                     with gr.Row(elem_classes="mod-palette"):
                         barline_btn = gr.Button("| 小節線", size="sm")
@@ -1627,7 +1641,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
             )
 
             # Chord quality toggle buttons (single-select)
-            _cq_btns = [cq_basic, cq_m, cq_7, cq_maj7, cq_sus4, cq_add9]
+            _cq_btns = [cq_basic, cq_m, cq_m7, cq_7, cq_maj7, cq_sus4, cq_sus2, cq_add9, cq_dim]
             _cq_outputs = [chord_quality_state] + _cq_btns
             for _lbl, _cqb in zip(_CQ_LABELS, _cq_btns):
                 _cqb.click(
@@ -1673,6 +1687,18 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                 )
 
             # Direct-append modifiers
+            mod_eighth.click(
+                fn=lambda t: append_melody_modifier(t, "_"),
+                inputs=[melody_input], outputs=[melody_input],
+            )
+            mod_sixteen.click(
+                fn=lambda t: append_melody_modifier(t, "__"),
+                inputs=[melody_input], outputs=[melody_input],
+            )
+            mod_dot.click(
+                fn=lambda t: append_melody_modifier(t, "."),
+                inputs=[melody_input], outputs=[melody_input],
+            )
             mod_extend.click(
                 fn=lambda t: append_melody_modifier(t, "-"),
                 inputs=[melody_input], outputs=[melody_input],
