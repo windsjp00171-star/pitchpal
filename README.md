@@ -1,5 +1,5 @@
 ---
-title: PitchPal 敬拜移調工具
+title: PitchPal 移調工具
 emoji: 🎵
 colorFrom: yellow
 colorTo: red
@@ -10,15 +10,15 @@ pinned: false
 license: mit
 ---
 
-# PitchPal — 敬拜移調 × 旋律試聽工具
+# PitchPal — 移調 × 旋律試聽工具
 
-專為敬拜帶領者設計：上傳音頻 → 偵測 Key → 移調下載，或直接用數字簡譜 + 和弦試聽編排。
+上傳音頻 → 偵測 Key → 移調下載，或直接用數字簡譜 + 和弦試聽編排。
 
 ## 功能
 
 **🎼 移調工具**
 - 上傳音頻（MP3、WAV、M4A 等），自動偵測原曲 Key
-- 選目標 Key，一鍵移調並下載（WAV / MP3 / MP4）
+- 選目標 Key，一鍵移調並下載（WAV / MP3）
 - 同步顯示各把位 Capo 建議
 
 **🎵 旋律試聽**
@@ -33,7 +33,7 @@ license: mit
 
 ## 免責聲明
 
-YouTube 連結功能僅供個人學習與敬拜預備使用，請遵守著作權法規，使用者自行承擔相關責任。
+YouTube 連結功能僅供個人學習使用，請遵守著作權法規，使用者自行承擔相關責任。
 
 ## 技術棧
 
