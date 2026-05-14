@@ -330,7 +330,7 @@ def transpose_audio(file, detected_key, steps, output_fmt):
         if needs_cleanup:
             extracted = audio_path
 
-        y, sr = librosa.load(audio_path, mono=False)
+        y, sr = librosa.load(audio_path, sr=None, mono=False)
 
         duration = len(y) / sr if y.ndim == 1 else y.shape[1] / sr
         if duration > MAX_DURATION_SEC:
@@ -340,10 +340,12 @@ def transpose_audio(file, detected_key, steps, output_fmt):
             y_shifted = y
         else:
             if y.ndim == 1:
-                y_shifted = librosa.effects.pitch_shift(y, sr=sr, n_steps=steps)
+                y_shifted = librosa.effects.pitch_shift(
+                    y, sr=sr, n_steps=steps, n_fft=4096)
             else:
                 y_shifted = np.stack([
-                    librosa.effects.pitch_shift(y[ch], sr=sr, n_steps=steps)
+                    librosa.effects.pitch_shift(
+                        y[ch], sr=sr, n_steps=steps, n_fft=4096)
                     for ch in range(y.shape[0])
                 ])
 
