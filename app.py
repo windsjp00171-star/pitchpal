@@ -934,6 +934,22 @@ def toggle_low(state: dict):
     return new_state, _mod_high_btn(new_state["high"]), _mod_low_btn(new_state["low"])
 
 
+_CQ_LABELS = ["基本", "7 藍調", "maj7 夢幻", "sus4 懸念", "add9 現代"]
+
+
+def _cq_btn(label: str, active: bool):
+    return gr.Button(
+        label + (" ✓" if active else ""),
+        variant="primary" if active else "secondary", size="sm",
+    )
+
+
+def _make_cq_handler(selected: str):
+    def _h(state):
+        return [selected] + [_cq_btn(lbl, lbl == selected) for lbl in _CQ_LABELS]
+    return _h
+
+
 def _play_note_with_mods(note_digit: str, key: str, octave: int,
                          timbre: str, state: dict) -> str | None:
     if note_digit == "0" or note_digit not in JIANPU_INTERVALS:
@@ -1327,12 +1343,14 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                             choices=["只試音", "加入輸入框"], value="只試音",
                             show_label=False, scale=2,
                         )
-                    with gr.Row():
-                        chord_quality_radio = gr.Radio(
-                            choices=["基本", "7 藍調", "maj7 夢幻", "sus4 懸念", "add9 現代"],
-                            value="基本", label="和弦色彩", scale=3,
-                        )
-                        barline_btn = gr.Button("| 小節線", size="sm", scale=1)
+                    chord_quality_state = gr.State("基本")
+                    with gr.Row(elem_classes="mod-palette"):
+                        cq_basic = gr.Button("基本 ✓", size="sm", variant="primary")
+                        cq_7     = gr.Button("7 藍調",    size="sm", variant="secondary")
+                        cq_maj7  = gr.Button("maj7 夢幻", size="sm", variant="secondary")
+                        cq_sus4  = gr.Button("sus4 懸念", size="sm", variant="secondary")
+                        cq_add9  = gr.Button("add9 現代", size="sm", variant="secondary")
+                        barline_btn = gr.Button("| 小節線", size="sm")
                     _init_chords = get_diatonic_chords("G")
                     with gr.Row(elem_classes="chord-palette"):
                         chord_btn_1 = gr.Button(_init_chords[0], size="sm")
@@ -1401,7 +1419,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
             for _btn in _chord_btns:
                 _btn.click(
                     fn=on_chord_palette_btn,
-                    inputs=[_btn, chord_input, chord_mode, chord_quality_radio],
+                    inputs=[_btn, chord_input, chord_mode, chord_quality_state],
                     outputs=[chord_preview, chord_input],
                 )
 
@@ -1410,6 +1428,16 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                 inputs=[chord_input],
                 outputs=[chord_input],
             )
+
+            # Chord quality toggle buttons (single-select)
+            _cq_btns = [cq_basic, cq_7, cq_maj7, cq_sus4, cq_add9]
+            _cq_outputs = [chord_quality_state] + _cq_btns
+            for _lbl, _cqb in zip(_CQ_LABELS, _cq_btns):
+                _cqb.click(
+                    fn=_make_cq_handler(_lbl),
+                    inputs=[chord_quality_state],
+                    outputs=_cq_outputs,
+                )
 
             # Toggle modifier buttons (sharp/high/low)
             mod_sharp.click(
