@@ -809,7 +809,7 @@ with gr.Blocks(title="PitchPal — 音樂 Key 辨別與移調工具", css=CSS) a
             with gr.Row():
                 with gr.Column(scale=1):
                     with gr.Group():
-                        gr.Markdown("**▶ 從 YouTube 下載**\n貼上連結後按「下載並分析」，會自動下載音頻並偵測調性。")
+                        gr.Markdown("**▶ 從 YouTube 下載**\n貼上連結後按「下載並分析」，會自動下載音頻並偵測調性。\n\n> ⚠️ 請確認你對該內容擁有合法授權（購買、CCLI 授權或版權方許可）。本工具僅供移調分析用途，使用者須自行承擔內容授權責任。")
                         with gr.Row():
                             yt_url_box = gr.Textbox(
                                 label="YouTube 連結",
