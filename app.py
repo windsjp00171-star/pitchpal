@@ -740,6 +740,14 @@ def _gen_melody(text, key, bpm, octave, timbre, chord_text, time_sig):
 
 # ── 和弦調色盤 ────────────────────────────────────────────────────────────────
 
+def _audio_html(path: str | None) -> str:
+    """Return an invisible autoplay <audio> element. Unique ID forces browser replay."""
+    if not path:
+        return ""
+    uid = os.urandom(4).hex()
+    return f'<audio id="pp{uid}" src="/file={path}" autoplay style="display:none"></audio>'
+
+
 # (interval from root in semitones, chord quality suffix) for major scale degrees I–VII
 DIATONIC_DEGREES = [(0, ""), (2, "m"), (4, "m"), (5, ""), (7, ""), (9, "m"), (11, "dim")]
 
@@ -797,13 +805,13 @@ def _apply_quality_mod(chord: str, mod: str) -> str:
 
 def on_chord_palette_btn(chord_name: str, chord_text: str, mode: str, quality_mod: str):
     effective = _apply_quality_mod(chord_name, quality_mod)
-    audio = play_chord_audio(effective)
+    html = _audio_html(play_chord_audio(effective))
     if mode == "加入輸入框":
         sep = " " if chord_text.strip() else ""
         new_text = chord_text.rstrip() + sep + effective
     else:
         new_text = chord_text
-    return audio, new_text
+    return html, new_text
 
 
 def add_barline_to_input(chord_text: str) -> str:
@@ -870,26 +878,19 @@ def _play_note_with_mods(note_digit: str, key: str, octave: int,
 
 def _make_note_handler(digit: str):
     def _h(melody_text, mode, key, octave, timbre, state):
-        audio = _play_note_with_mods(digit, key, int(octave), timbre, state)
-        # Build token: digit [#] [' or ,]
-        if digit == "0":
-            tok = "0"
-        else:
-            tok = digit
-            if state.get("sharp"):  tok += "#"
-            if state.get("high"):   tok += "'"
-            if state.get("low"):    tok += ","
+        html = _audio_html(_play_note_with_mods(digit, key, int(octave), timbre, state))
+        tok = "0" if digit == "0" else digit
+        if digit != "0":
+            if state.get("sharp"): tok += "#"
+            if state.get("high"):  tok += "'"
+            if state.get("low"):   tok += ","
         if mode == "加入輸入框":
             sep = " " if melody_text.strip() else ""
             new_text = melody_text.rstrip() + sep + tok
         else:
             new_text = melody_text
-        # Sharp resets after each note; octave is sticky
-        new_state = {**state, "sharp": False}
-        return (audio, new_text, new_state,
-                _mod_sharp_btn(False),
-                _mod_high_btn(new_state["high"]),
-                _mod_low_btn(new_state["low"]))
+        # All modifiers are sticky — user toggles manually, no auto-reset
+        return html, new_text
     return _h
 
 
@@ -1188,14 +1189,11 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                 # ── 旋律欄 ────────────────────────────────────────────────
                 with gr.Column(scale=5):
                     gr.Markdown("**🎵 旋律**", elem_classes="section-header")
+                    note_preview = gr.HTML(value="")
                     with gr.Row():
                         note_mode = gr.Radio(
                             choices=["只試音", "加入輸入框"], value="只試音",
                             show_label=False, scale=2,
-                        )
-                        note_preview = gr.Audio(
-                            label="", type="filepath",
-                            show_download_button=False, autoplay=True, scale=3,
                         )
                     with gr.Row(elem_classes="note-palette"):
                         note_btn_1 = gr.Button("1", size="sm")
@@ -1221,14 +1219,11 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                 # ── 和弦欄 ────────────────────────────────────────────────
                 with gr.Column(scale=5):
                     gr.Markdown("**🎸 和弦**", elem_classes="section-header")
+                    chord_preview = gr.HTML(value="")
                     with gr.Row():
                         chord_mode = gr.Radio(
                             choices=["只試音", "加入輸入框"], value="只試音",
                             show_label=False, scale=2,
-                        )
-                        chord_preview = gr.Audio(
-                            label="", type="filepath",
-                            show_download_button=False, autoplay=True, scale=3,
                         )
                     with gr.Row():
                         chord_quality_radio = gr.Radio(
@@ -1329,7 +1324,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                 outputs=[mod_state, mod_high, mod_low],
             )
 
-            # Note buttons (carry state, output updated state + reset sharp btn)
+            # Note buttons
             _note_btns_digits = [
                 (note_btn_1, "1"), (note_btn_2, "2"), (note_btn_3, "3"),
                 (note_btn_4, "4"), (note_btn_5, "5"), (note_btn_6, "6"),
@@ -1340,8 +1335,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                     fn=_make_note_handler(_digit),
                     inputs=[melody_input, note_mode, melody_key,
                             melody_octave, melody_timbre, mod_state],
-                    outputs=[note_preview, melody_input, mod_state,
-                             mod_sharp, mod_high, mod_low],
+                    outputs=[note_preview, melody_input],
                 )
 
             # Direct-append modifiers
