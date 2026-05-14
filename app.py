@@ -297,15 +297,23 @@ def on_slider_change(detected_key: str, steps: int):
     return rkey, capo
 
 
-def _write_wav(y: np.ndarray, sr: int) -> str:
-    fd, wav_path = tempfile.mkstemp(suffix=".wav")
+def _safe_stem(name: str, max_len: int = 60) -> str:
+    """Sanitise a filename stem: strip path, remove illegal chars, truncate."""
+    stem = os.path.splitext(os.path.basename(name))[0]
+    stem = "".join(c if c.isalnum() or c in " _-()[]" else "_" for c in stem)
+    stem = stem.strip("_ ") or "audio"
+    return stem[:max_len]
+
+
+def _write_wav(y: np.ndarray, sr: int, stem: str = "audio") -> str:
+    fd, wav_path = tempfile.mkstemp(suffix=f"__{stem}.wav")
     os.close(fd)
     sf.write(wav_path, y.T if y.ndim > 1 else y, sr)
     return wav_path
 
 
-def _convert_to_mp3(wav_path: str) -> str:
-    fd, out_path = tempfile.mkstemp(suffix=".mp3")
+def _convert_to_mp3(wav_path: str, stem: str = "audio") -> str:
+    fd, out_path = tempfile.mkstemp(suffix=f"__{stem}.mp3")
     os.close(fd)
     subprocess.run(
         ["ffmpeg", "-i", wav_path, "-q:a", "2", out_path, "-y"],
@@ -325,6 +333,11 @@ def transpose_audio(file, detected_key, steps, output_fmt):
         return None, "輸出 MP3 需要 ffmpeg，目前環境不支援。"
 
     steps = int(steps)
+    direction = f"+{steps}" if steps > 0 else str(steps)
+    stem = _safe_stem(file_path)
+    if steps != 0:
+        stem = f"{stem}_({direction}半音)"
+
     extracted = wav_path = None
     try:
         audio_path, needs_cleanup = _prepare_audio(file_path)
@@ -340,7 +353,6 @@ def transpose_audio(file, detected_key, steps, output_fmt):
         if steps == 0:
             y_shifted = y
         else:
-            # n_fft=8192 + bins_per_octave=24: highest quality librosa can offer
             _ps = lambda ch: librosa.effects.pitch_shift(
                 ch, sr=sr, n_steps=steps, n_fft=8192, bins_per_octave=24)
             if y.ndim == 1:
@@ -348,15 +360,14 @@ def transpose_audio(file, detected_key, steps, output_fmt):
             else:
                 y_shifted = np.stack([_ps(y[ch]) for ch in range(y.shape[0])])
 
-        wav_path = _write_wav(y_shifted, sr)
+        wav_path = _write_wav(y_shifted, sr, stem)
 
         if output_fmt == "WAV":
             out_path = wav_path
             wav_path = None
         else:
-            out_path = _convert_to_mp3(wav_path)
+            out_path = _convert_to_mp3(wav_path, stem)
 
-        direction = f"+{steps}" if steps > 0 else str(steps)
         if steps == 0:
             msg = f"無移調，已輸出為 {output_fmt}。"
         elif detected_key and not detected_key.startswith("偵測失敗"):
