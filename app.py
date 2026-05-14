@@ -863,6 +863,7 @@ def play_chord_audio(chord_name: str) -> str | None:
 
 
 def _apply_quality_mod(chord: str, mod: str) -> str:
+    mod = mod.split()[0]  # strip the Chinese label ("7 藍調" → "7")
     if mod == "基本":
         return chord
     root = chord
@@ -1328,8 +1329,8 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                         )
                     with gr.Row():
                         chord_quality_radio = gr.Radio(
-                            choices=["基本", "7", "maj7", "sus4", "add9"],
-                            value="基本", label="延伸音", scale=3,
+                            choices=["基本", "7 藍調", "maj7 夢幻", "sus4 懸念", "add9 現代"],
+                            value="基本", label="和弦色彩", scale=3,
                         )
                         barline_btn = gr.Button("| 小節線", size="sm", scale=1)
                     _init_chords = get_diatonic_chords("G")
