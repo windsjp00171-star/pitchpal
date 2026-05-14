@@ -1025,10 +1025,12 @@ def _apply_quality_mod(chord: str, mod: str) -> str:
             break
     if mod == "m":
         return root + "m"
+    if mod == "m7":
+        return root + "m7"
     if mod == "7":
-        return root + ("m7" if is_minor else "dim7" if is_dim else "7")
+        return root + ("dim7" if is_dim else "7")
     if mod == "maj7":
-        return root + ("m7" if is_minor else "maj7")
+        return root + "maj7"
     if mod == "sus4":
         return root + "sus4"
     if mod == "add9":
@@ -1095,7 +1097,7 @@ def toggle_low(state: dict):
     return new_state, _mod_high_btn(new_state["high"]), _mod_low_btn(new_state["low"])
 
 
-_CQ_LABELS = ["基本", "m 小調", "7 藍調", "maj7 夢幻", "sus4 懸念", "add9 現代"]
+_CQ_LABELS = ["基本", "m 小調", "m7 小七", "7 藍調", "maj7 夢幻", "sus4 懸念", "add9 現代"]
 
 
 def _cq_btn(label: str, active: bool):
