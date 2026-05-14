@@ -569,12 +569,13 @@ def _parse_chord_token(tok: str) -> list[int] | None:
 
 
 def _synth_chord_block(midi_notes: list[int], duration: float,
-                       sr: int, rng: np.random.Generator) -> np.ndarray:
+                       sr: int, rng: np.random.Generator,
+                       timbre: str = "鋼琴") -> np.ndarray:
     n = int(sr * duration)
     mixed = np.zeros(n, dtype=np.float64)
     for midi in midi_notes:
         freq = 440.0 * (2 ** ((midi - 69) / 12))
-        mixed += _tone_piano(freq, duration, sr, rng).astype(np.float64)
+        mixed += _tone(freq, duration, sr, timbre, rng).astype(np.float64)
     peak = np.max(np.abs(mixed))
     if peak > 0:
         mixed /= peak
@@ -583,9 +584,8 @@ def _synth_chord_block(midi_notes: list[int], duration: float,
 
 def _synth_chord_sequence(text: str, bpm: int, sr: int,
                           rng: np.random.Generator,
-                          beats_per_bar: int = 4) -> np.ndarray:
-    """Bar-based chord sequence: 'C Em7 | D | G/B | Em7 D'
-    Chords within a bar share beats evenly."""
+                          beats_per_bar: int = 4,
+                          timbre: str = "鋼琴") -> np.ndarray:
     beat = 60.0 / bpm
     bars = text.split("|")
     segments: list[np.ndarray] = []
@@ -598,7 +598,7 @@ def _synth_chord_sequence(text: str, bpm: int, sr: int,
         for tok in chords:
             notes = _parse_chord_token(tok)
             if notes:
-                segments.append(_synth_chord_block(notes, dur, sr, rng))
+                segments.append(_synth_chord_block(notes, dur, sr, rng, timbre))
             else:
                 segments.append(np.zeros(int(sr * dur), dtype=np.float32))
 
@@ -834,7 +834,7 @@ def parse_and_synth(text: str, key: str, bpm: int, octave: int,
         melody_audio = np.zeros(0, dtype=np.float32)
 
     if has_chords:
-        chord_audio = _synth_chord_sequence(chord_text, bpm, sr, _RNG, beats_per_bar)
+        chord_audio = _synth_chord_sequence(chord_text, bpm, sr, _RNG, beats_per_bar, timbre)
         if len(melody_audio) == 0:
             audio = chord_audio
         else:
