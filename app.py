@@ -780,11 +780,50 @@ def add_barline_to_input(chord_text: str) -> str:
     return chord_text.rstrip() + " |"
 
 
-def play_note_audio(note_digit: str, key: str, octave: int, timbre: str) -> str | None:
-    if note_digit not in JIANPU_INTERVALS:
+_MOD_INIT = {"sharp": False, "high": False, "low": False}
+
+
+def _mod_sharp_btn(active: bool):
+    return gr.Button("# 升 ✓" if active else "# 升",
+                     variant="primary" if active else "secondary", size="sm")
+
+def _mod_high_btn(active: bool):
+    return gr.Button("' 高八 ✓" if active else "' 高八",
+                     variant="primary" if active else "secondary", size="sm")
+
+def _mod_low_btn(active: bool):
+    return gr.Button(", 低八 ✓" if active else ", 低八",
+                     variant="primary" if active else "secondary", size="sm")
+
+
+def toggle_sharp(state: dict):
+    new_state = {**state, "sharp": not state["sharp"]}
+    return new_state, _mod_sharp_btn(new_state["sharp"])
+
+
+def toggle_high(state: dict):
+    new_h = not state["high"]
+    new_state = {**state, "high": new_h, "low": False if new_h else state["low"]}
+    return new_state, _mod_high_btn(new_state["high"]), _mod_low_btn(new_state["low"])
+
+
+def toggle_low(state: dict):
+    new_l = not state["low"]
+    new_state = {**state, "low": new_l, "high": False if new_l else state["high"]}
+    return new_state, _mod_high_btn(new_state["high"]), _mod_low_btn(new_state["low"])
+
+
+def _play_note_with_mods(note_digit: str, key: str, octave: int,
+                         timbre: str, state: dict) -> str | None:
+    if note_digit == "0" or note_digit not in JIANPU_INTERVALS:
         return None
+    sharp = state.get("sharp", False)
+    high  = state.get("high",  False)
+    low   = state.get("low",   False)
     root_midi = MELODY_KEY_ROOTS.get(key, 60) + (int(octave) - 4) * 12
-    midi = root_midi + JIANPU_INTERVALS[note_digit]
+    semitone = JIANPU_INTERVALS[note_digit] + (1 if sharp else 0)
+    oct_shift = (1 if high else 0) - (1 if low else 0)
+    midi = root_midi + semitone + oct_shift * 12
     freq = 440.0 * (2 ** ((midi - 69) / 12))
     rng = np.random.default_rng()
     sr = 44100
@@ -799,19 +838,33 @@ def play_note_audio(note_digit: str, key: str, octave: int, timbre: str) -> str 
     return path
 
 
-def on_note_palette_btn(note_digit: str, melody_text: str, mode: str,
-                        key: str, octave: int, timbre: str):
-    audio = play_note_audio(note_digit, key, int(octave), timbre)
-    if mode == "加入輸入框":
-        sep = " " if melody_text.strip() else ""
-        new_text = melody_text.rstrip() + sep + note_digit
-    else:
-        new_text = melody_text
-    return audio, new_text
+def _make_note_handler(digit: str):
+    def _h(melody_text, mode, key, octave, timbre, state):
+        audio = _play_note_with_mods(digit, key, int(octave), timbre, state)
+        # Build token: digit [#] [' or ,]
+        if digit == "0":
+            tok = "0"
+        else:
+            tok = digit
+            if state.get("sharp"):  tok += "#"
+            if state.get("high"):   tok += "'"
+            if state.get("low"):    tok += ","
+        if mode == "加入輸入框":
+            sep = " " if melody_text.strip() else ""
+            new_text = melody_text.rstrip() + sep + tok
+        else:
+            new_text = melody_text
+        # Sharp resets after each note; octave is sticky
+        new_state = {**state, "sharp": False}
+        return (audio, new_text, new_state,
+                _mod_sharp_btn(False),
+                _mod_high_btn(new_state["high"]),
+                _mod_low_btn(new_state["low"]))
+    return _h
 
 
 def append_melody_modifier(melody_text: str, char: str) -> str:
-    if char in ("'", ",", "#", "-"):
+    if char in ("-",):
         return melody_text.rstrip() + char
     sep = " " if melody_text.strip() else ""
     return melody_text.rstrip() + sep + char
@@ -1088,110 +1141,104 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
 
         # ── Tab 2：旋律試聽 ──────────────────────────────────────────────────
         with gr.Tab("🎼 旋律試聽"):
-            with gr.Row(equal_height=False):
+            mod_state = gr.State(_MOD_INIT)
 
-                # ── 左欄：調色盤 + 文字輸入 ─────────────────────────────────
-                with gr.Column(scale=6):
+            # ── 設定列（最頂部，橫向緊湊） ──────────────────────────────────
+            gr.Markdown("**設定**", elem_classes="section-header")
+            with gr.Row():
+                melody_key = gr.Dropdown(
+                    label="調性（1=?）", choices=MELODY_KEYS, value="G", scale=1,
+                )
+                melody_bpm = gr.Slider(
+                    label="BPM", minimum=40, maximum=200, step=1, value=80, scale=2,
+                )
+                melody_octave = gr.Slider(
+                    label="八度", minimum=2, maximum=6, step=1, value=4, scale=1,
+                )
+                melody_timbre = gr.Radio(
+                    label="音色", choices=["鋼琴", "吉他"], value="鋼琴", scale=1,
+                )
+                time_sig_radio = gr.Radio(
+                    label="拍號", choices=["4/4", "3/4"], value="4/4", scale=1,
+                )
 
-                    # 旋律調色盤
-                    gr.Markdown("**旋律調色盤**", elem_classes="section-header")
-                    with gr.Row():
-                        note_mode = gr.Radio(
-                            choices=["只試音", "加入輸入框"],
-                            value="只試音",
-                            show_label=False,
-                            scale=3,
-                        )
-                    with gr.Row(elem_classes="note-palette"):
-                        note_btn_1 = gr.Button("1", size="sm")
-                        note_btn_2 = gr.Button("2", size="sm")
-                        note_btn_3 = gr.Button("3", size="sm")
-                        note_btn_4 = gr.Button("4", size="sm")
-                        note_btn_5 = gr.Button("5", size="sm")
-                        note_btn_6 = gr.Button("6", size="sm")
-                        note_btn_7 = gr.Button("7", size="sm")
-                        note_btn_0 = gr.Button("0 休", size="sm")
-                    with gr.Row(elem_classes="mod-palette"):
-                        mod_sharp  = gr.Button("# 升",  size="sm")
-                        mod_high   = gr.Button("' 高八", size="sm")
-                        mod_low    = gr.Button(", 低八", size="sm")
-                        mod_extend = gr.Button("- 延音", size="sm")
-                        mod_bar    = gr.Button("| 小節", size="sm")
-                    note_preview = gr.Audio(
-                        label="音符試聽", type="filepath",
-                        show_download_button=False, autoplay=True,
-                    )
+            # ── 旋律調色盤 ────────────────────────────────────────────────
+            gr.Markdown("**旋律調色盤**", elem_classes="section-header")
+            with gr.Row():
+                note_mode = gr.Radio(
+                    choices=["只試音", "加入輸入框"], value="只試音",
+                    show_label=False, scale=2,
+                )
+                note_preview = gr.Audio(
+                    label="", type="filepath",
+                    show_download_button=False, autoplay=True, scale=3,
+                )
+            with gr.Row(elem_classes="note-palette"):
+                note_btn_1 = gr.Button("1", size="sm")
+                note_btn_2 = gr.Button("2", size="sm")
+                note_btn_3 = gr.Button("3", size="sm")
+                note_btn_4 = gr.Button("4", size="sm")
+                note_btn_5 = gr.Button("5", size="sm")
+                note_btn_6 = gr.Button("6", size="sm")
+                note_btn_7 = gr.Button("7", size="sm")
+                note_btn_0 = gr.Button("0 休", size="sm")
+            with gr.Row(elem_classes="mod-palette"):
+                mod_sharp  = gr.Button("# 升",  size="sm", variant="secondary")
+                mod_high   = gr.Button("' 高八", size="sm", variant="secondary")
+                mod_low    = gr.Button(", 低八", size="sm", variant="secondary")
+                mod_extend = gr.Button("- 延音", size="sm")
+                mod_bar_m  = gr.Button("| 小節", size="sm")
 
-                    # 旋律文字輸入
-                    gr.Markdown("**旋律**", elem_classes="section-header")
-                    melody_input = gr.Textbox(
-                        label="數字簡譜（1=Do … 7=Ti，選填）",
-                        placeholder="5 6 7 5 3 - - - | 7 5 6 - | 4# 5 6 4# 2 - | 6 4# 5 -",
-                        lines=3,
-                    )
+            # ── 旋律輸入框 ────────────────────────────────────────────────
+            melody_input = gr.Textbox(
+                label="旋律（數字簡譜，選填）",
+                placeholder="5 6 7 5 3 - - - | 7 5 6 - | 4# 5 6 4# 2 - | 6 4# 5 -",
+                lines=2,
+            )
 
-                    # 和弦調色盤
-                    gr.Markdown("**和弦調色盤**", elem_classes="section-header")
-                    with gr.Row():
-                        chord_mode = gr.Radio(
-                            choices=["只試音", "加入輸入框"],
-                            value="只試音",
-                            show_label=False,
-                            scale=3,
-                        )
-                        barline_btn = gr.Button("| 加小節線", size="sm", scale=1)
-                    chord_quality_radio = gr.Radio(
-                        choices=["基本", "7", "maj7", "sus4", "add9"],
-                        value="基本",
-                        label="延伸音",
-                    )
-                    _init_chords = get_diatonic_chords("G")
-                    with gr.Row(elem_classes="chord-palette"):
-                        chord_btn_1 = gr.Button(_init_chords[0], size="sm")
-                        chord_btn_2 = gr.Button(_init_chords[1], size="sm")
-                        chord_btn_3 = gr.Button(_init_chords[2], size="sm")
-                        chord_btn_4 = gr.Button(_init_chords[3], size="sm")
-                        chord_btn_5 = gr.Button(_init_chords[4], size="sm")
-                        chord_btn_6 = gr.Button(_init_chords[5], size="sm")
-                        chord_btn_7 = gr.Button(_init_chords[6], size="sm")
-                    chord_preview = gr.Audio(
-                        label="和弦試聽", type="filepath",
-                        show_download_button=False, autoplay=True,
-                    )
+            # ── 和弦調色盤 ────────────────────────────────────────────────
+            gr.Markdown("**和弦調色盤**", elem_classes="section-header")
+            with gr.Row():
+                chord_mode = gr.Radio(
+                    choices=["只試音", "加入輸入框"], value="只試音",
+                    show_label=False, scale=2,
+                )
+                chord_quality_radio = gr.Radio(
+                    choices=["基本", "7", "maj7", "sus4", "add9"],
+                    value="基本", label="延伸音", scale=3,
+                )
+                barline_btn = gr.Button("| 小節線", size="sm", scale=1)
+                chord_preview = gr.Audio(
+                    label="", type="filepath",
+                    show_download_button=False, autoplay=True, scale=3,
+                )
+            _init_chords = get_diatonic_chords("G")
+            with gr.Row(elem_classes="chord-palette"):
+                chord_btn_1 = gr.Button(_init_chords[0], size="sm")
+                chord_btn_2 = gr.Button(_init_chords[1], size="sm")
+                chord_btn_3 = gr.Button(_init_chords[2], size="sm")
+                chord_btn_4 = gr.Button(_init_chords[3], size="sm")
+                chord_btn_5 = gr.Button(_init_chords[4], size="sm")
+                chord_btn_6 = gr.Button(_init_chords[5], size="sm")
+                chord_btn_7 = gr.Button(_init_chords[6], size="sm")
 
-                    # 和弦文字輸入
-                    gr.Markdown("**和弦進行**", elem_classes="section-header")
-                    chord_input = gr.Textbox(
-                        label="用 | 分小節，同小節和弦自動平均分拍（選填）",
-                        placeholder="C Em7 | D | G/B | Em7 D",
-                        lines=2,
-                    )
+            # ── 和弦輸入框 ────────────────────────────────────────────────
+            chord_input = gr.Textbox(
+                label="和弦進行（選填）— 用 | 分小節，同小節和弦平均分拍",
+                placeholder="C Em7 | D | G/B | Em7 D",
+                lines=2,
+            )
 
-                # ── 右欄：設定 + 生成 + 輸出 ────────────────────────────────
-                with gr.Column(scale=4):
-                    gr.Markdown("**設定**", elem_classes="section-header")
-                    melody_key = gr.Dropdown(
-                        label="調性（1 = ?）",
-                        choices=MELODY_KEYS, value="G",
-                    )
-                    melody_bpm = gr.Slider(
-                        label="BPM", minimum=40, maximum=200, step=1, value=80,
-                    )
-                    melody_octave = gr.Slider(
-                        label="八度", minimum=2, maximum=6, step=1, value=4,
-                    )
-                    melody_timbre = gr.Radio(
-                        label="音色", choices=["鋼琴", "吉他"], value="鋼琴",
-                    )
-                    time_sig_radio = gr.Radio(
-                        label="拍號", choices=["4/4", "3/4"], value="4/4",
-                    )
-                    melody_btn = gr.Button("🎵 生成試聽", variant="primary", size="lg")
-                    melody_status = gr.Textbox(label="狀態", interactive=False)
-                    melody_output = gr.Audio(label="試聽音頻", type="filepath")
-                    gr.Markdown(JIANPU_HELP)
+            # ── 生成 + 輸出 ───────────────────────────────────────────────
+            melody_btn = gr.Button("🎵 生成試聽", variant="primary", size="lg")
+            melody_status = gr.Textbox(label="狀態", interactive=False)
+            melody_output = gr.Audio(label="試聽音頻", type="filepath")
 
-            # ── 事件綁定 ────────────────────────────────────────────────────
+            # ── 格式說明 ──────────────────────────────────────────────────
+            with gr.Accordion("📖 格式說明", open=False):
+                gr.Markdown(JIANPU_HELP)
+
+            # ── 事件綁定 ──────────────────────────────────────────────────
             melody_btn.click(
                 fn=_gen_melody,
                 inputs=[melody_input, melody_key, melody_bpm, melody_octave,
@@ -1228,12 +1275,24 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                 outputs=[chord_input],
             )
 
-            # Note palette buttons (use factory to avoid closure issue)
-            def _make_note_handler(digit):
-                def _h(melody_text, mode, key, octave, timbre):
-                    return on_note_palette_btn(digit, melody_text, mode, key, octave, timbre)
-                return _h
+            # Toggle modifier buttons (sharp/high/low)
+            mod_sharp.click(
+                fn=toggle_sharp,
+                inputs=[mod_state],
+                outputs=[mod_state, mod_sharp],
+            )
+            mod_high.click(
+                fn=toggle_high,
+                inputs=[mod_state],
+                outputs=[mod_state, mod_high, mod_low],
+            )
+            mod_low.click(
+                fn=toggle_low,
+                inputs=[mod_state],
+                outputs=[mod_state, mod_high, mod_low],
+            )
 
+            # Note buttons (carry state, output updated state + reset sharp btn)
             _note_btns_digits = [
                 (note_btn_1, "1"), (note_btn_2, "2"), (note_btn_3, "3"),
                 (note_btn_4, "4"), (note_btn_5, "5"), (note_btn_6, "6"),
@@ -1242,25 +1301,21 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
             for _nbtn, _digit in _note_btns_digits:
                 _nbtn.click(
                     fn=_make_note_handler(_digit),
-                    inputs=[melody_input, note_mode, melody_key, melody_octave, melody_timbre],
-                    outputs=[note_preview, melody_input],
+                    inputs=[melody_input, note_mode, melody_key,
+                            melody_octave, melody_timbre, mod_state],
+                    outputs=[note_preview, melody_input, mod_state,
+                             mod_sharp, mod_high, mod_low],
                 )
 
-            # Modifier buttons
-            def _make_mod_handler(char):
-                def _h(text):
-                    return append_melody_modifier(text, char)
-                return _h
-
-            for _mbtn, _char in [
-                (mod_sharp, "#"), (mod_high, "'"), (mod_low, ","),
-                (mod_extend, "-"), (mod_bar, "|"),
-            ]:
-                _mbtn.click(
-                    fn=_make_mod_handler(_char),
-                    inputs=[melody_input],
-                    outputs=[melody_input],
-                )
+            # Direct-append modifiers
+            mod_extend.click(
+                fn=lambda t: append_melody_modifier(t, "-"),
+                inputs=[melody_input], outputs=[melody_input],
+            )
+            mod_bar_m.click(
+                fn=lambda t: append_melody_modifier(t, "|"),
+                inputs=[melody_input], outputs=[melody_input],
+            )
 
 if __name__ == "__main__":
     demo.launch(inbrowser=True)
