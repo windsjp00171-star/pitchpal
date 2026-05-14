@@ -363,6 +363,15 @@ def capo_suggestions(key_str: str) -> str:
     return "\n".join(r[1] for r in results)
 
 
+def _conf_display(conf: int) -> str:
+    if conf >= 70:
+        return f"🟢 {conf}%"
+    elif conf >= 40:
+        return f"🟡 {conf}%"
+    else:
+        return f"🔴 {conf}%"
+
+
 def process_upload(file):
     try:
         if not file:
@@ -387,7 +396,7 @@ def process_upload(file):
 
         rkey = result_key(key, 0)
         capo = capo_suggestions(rkey)
-        return filename, key, f"{conf}%", rkey, capo
+        return filename, key, _conf_display(conf), rkey, capo
     except Exception as e:
         msg = f"{type(e).__name__}: {e}"
         print(f"[pitchpal] process_upload error:\n{traceback.format_exc()}")
@@ -771,7 +780,7 @@ def _submit_feedback(file, detected, conf_str, corrected, notes):
         p = _resolve_path(file)
         filename = os.path.basename(p) if p else ""
     try:
-        conf = int(conf_str.replace("%", ""))
+        conf = int("".join(c for c in conf_str if c.isdigit()))
     except Exception:
         conf = None
     return submit_feedback(filename, detected, corrected, conf, notes)
@@ -956,7 +965,10 @@ def _make_note_handler(digit: str):
 
 
 def append_melody_modifier(melody_text: str, char: str) -> str:
-    if char in ("-",):
+    if char == "-":
+        # Don't attach to empty input or whitespace-only
+        if not melody_text.strip():
+            return melody_text
         return melody_text.rstrip() + char
     sep = " " if melody_text.strip() else ""
     return melody_text.rstrip() + sep + char
@@ -1077,7 +1089,7 @@ def download_youtube(url: str, cookies_file: str | None = None):
         key, conf = detect_key(audio_path)
         rkey = result_key(key, 0)
         capo = capo_suggestions(rkey)
-        return audio_path, title, key, f"{conf}%", rkey, capo, f"✅ 完成：《{title}》｜偵測調性：{key}"
+        return audio_path, title, key, _conf_display(conf), rkey, capo, f"✅ 完成：《{title}》｜偵測調性：{key}"
 
     except Exception as e:
         print(f"[pitchpal] download_youtube error:\n{traceback.format_exc()}")
@@ -1087,10 +1099,6 @@ def download_youtube(url: str, cookies_file: str | None = None):
             shutil.rmtree(tmpdir, ignore_errors=True)
 
 
-UPLOAD_NOTE = """
-> **支援格式：** MP3、WAV、M4A、FLAC、MKV、MP4、AVI（影片自動擷取音軌）
-> **檔案上限：** 音頻 50 MB｜影片 200 MB｜長度 10 分鐘以內
-"""
 
 with gr.Blocks(title="PitchPal", css=CSS) as demo:
     gr.Markdown("""
@@ -1309,6 +1317,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                         placeholder="5 6 7 5 3 - - - | 7 5 6 -",
                         lines=3,
                     )
+                    melody_clear = gr.Button("🗑 清空旋律", size="sm", variant="secondary")
 
                 # ── 和弦欄 ────────────────────────────────────────────────
                 with gr.Column(scale=5):
@@ -1339,6 +1348,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                         placeholder="C Em7 | D | G/B | Em7 D",
                         lines=3,
                     )
+                    chord_clear = gr.Button("🗑 清空和弦", size="sm", variant="secondary")
 
             # ── 步驟二：設定 + 生成 ───────────────────────────────────────
             gr.Markdown(
@@ -1442,6 +1452,10 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                 fn=lambda t: append_melody_modifier(t, "|"),
                 inputs=[melody_input], outputs=[melody_input],
             )
+
+            # Clear buttons
+            melody_clear.click(fn=lambda: "", outputs=[melody_input])
+            chord_clear.click(fn=lambda: "", outputs=[chord_input])
 
 if __name__ == "__main__":
     demo.launch(inbrowser=True)
