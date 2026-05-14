@@ -1136,14 +1136,14 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
     gr.Markdown("""
 <div style="background:linear-gradient(135deg,#1a1a2e,#16213e,#0f3460);border-radius:12px;padding:22px 28px;margin-bottom:4px">
 <h1 style="color:#f0c040;margin:0;font-size:1.8em;letter-spacing:0.04em">🎵 PitchPal</h1>
-<p style="color:#a8c5e8;margin:6px 0 0;font-size:0.95em">音樂移調工具 — 辨調、移調、Capo 建議、旋律試聽，一站完成。</p>
+<p style="color:#a8c5e8;margin:6px 0 0;font-size:0.95em">調 KEY 工具 — 辨調、調 KEY、Capo 建議、旋律試聽，一站完成。</p>
 </div>
 """)
 
     with gr.Tabs():
 
-        # ── Tab 1：移調工具 ──────────────────────────────────────────────────
-        with gr.Tab("🎚️ 移調工具"):
+        # ── Tab 1：調 KEY 工具 ──────────────────────────────────────────────────
+        with gr.Tab("🎚️ 調 KEY 工具"):
 
             # ── 上排：音源 | 分析結果（並排） ───────────────────────────────
             with gr.Row(equal_height=False):
@@ -1232,7 +1232,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
 
                 # 左：移調設定
                 with gr.Column(scale=5):
-                    gr.Markdown("**🎚️ 移調設定**", elem_classes="section-header")
+                    gr.Markdown("**🎚️ 調 KEY 設定**", elem_classes="section-header")
                     with gr.Row():
                         steps_slider = gr.Number(
                             label="半音數（+ 升調 / − 降調）",
