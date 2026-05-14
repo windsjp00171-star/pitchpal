@@ -1111,45 +1111,43 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                 # 左：音源
                 with gr.Column(scale=5):
                     gr.Markdown("**📂 音源**", elem_classes="section-header")
-                    with gr.Tabs():
-                        with gr.Tab("上傳檔案"):
-                            audio_input = gr.Audio(
-                                type="filepath",
-                                sources=["upload"],
+                    audio_input = gr.Audio(
+                        type="filepath",
+                        sources=["upload"],
+                        show_label=False,
+                    )
+                    gr.Markdown(
+                        "<small>支援 MP3、WAV、M4A、FLAC、MP4、MKV｜音頻 50 MB / 影片 200 MB / 10 分鐘以內</small>",
+                    )
+                    with gr.Accordion("🔗 YouTube 連結（實驗性）", open=False):
+                        gr.Markdown(
+                            "<small>⚠️ 雲端伺服器 IP 常被 YouTube 封鎖，成功率約 40–60%，不穩定屬正常現象。"
+                            "建議優先使用上方直接上傳音檔。</small>"
+                        )
+                        with gr.Row():
+                            yt_url_box = gr.Textbox(
+                                placeholder="https://www.youtube.com/watch?v=...",
                                 show_label=False,
+                                scale=4,
                             )
+                            yt_btn = gr.Button("▶ 分析", variant="secondary", scale=1)
+                        yt_status_box = gr.Textbox(
+                            show_label=False, interactive=False,
+                            placeholder="狀態…",
+                        )
+                        with gr.Accordion("遇到下載限制？", open=False):
                             gr.Markdown(
-                                "<small>支援 MP3、WAV、M4A、FLAC、MP4、MKV｜音頻 50 MB / 影片 200 MB / 10 分鐘以內</small>",
+                                "用 **Get cookies.txt LOCALLY** 擴充套件匯出 YouTube cookies.txt 後上傳，"
+                                "可解決「需要登入」或「年齡限制」的問題。"
                             )
-                        with gr.Tab("YouTube 連結"):
-                            gr.Markdown(
-                                "<small>⚡ 建議直接上傳音檔——雲端伺服器 IP 常被 YouTube 限制，連結分析成功率約 40–60%，"
-                                "若持續失敗請改用「上傳檔案」。</small>"
+                            yt_cookies_file = gr.File(
+                                label="cookies.txt",
+                                file_types=[".txt"],
+                                type="filepath",
                             )
-                            with gr.Row():
-                                yt_url_box = gr.Textbox(
-                                    placeholder="https://www.youtube.com/watch?v=...",
-                                    show_label=False,
-                                    scale=4,
-                                )
-                                yt_btn = gr.Button("▶ 分析", variant="primary", scale=1)
-                            yt_status_box = gr.Textbox(
-                                show_label=False, interactive=False,
-                                placeholder="下載狀態…",
-                            )
-                            with gr.Accordion("遇到下載限制？", open=False):
-                                gr.Markdown(
-                                    "用 **Get cookies.txt LOCALLY** 擴充套件匯出 YouTube cookies.txt 後上傳，"
-                                    "可解決「需要登入」或「年齡限制」的問題。"
-                                )
-                                yt_cookies_file = gr.File(
-                                    label="cookies.txt",
-                                    file_types=[".txt"],
-                                    type="filepath",
-                                )
-                            gr.Markdown(
-                                "<small>⚠️ 請確認你對該內容擁有合法授權（購買、CCLI 或版權方許可）。本工具僅供移調分析，授權責任由使用者自行承擔。</small>"
-                            )
+                        gr.Markdown(
+                            "<small>請確認你對該內容擁有合法授權（購買、CCLI 或版權方許可）。本工具僅供移調分析，授權責任由使用者自行承擔。</small>"
+                        )
 
                 # 右：分析結果
                 with gr.Column(scale=5):
