@@ -708,48 +708,55 @@ def _tone_harp(freq: float, duration: float, sr: int, rng: np.random.Generator) 
     if n == 0:
         return np.zeros(0, dtype=np.float32)
     x = np.zeros(n, dtype=np.float64)
-    # Sharper impulse for brighter attack
     x[:period] = rng.uniform(-1.0, 1.0, period)
     x[:period] += np.sin(np.linspace(0, np.pi, period)) * 0.5
-    # Faster decay than guitar
-    coeff = rng.uniform(0.988, 0.993)
+    # Slower decay so it rings (was 0.988–0.993, now closer to guitar)
+    coeff = rng.uniform(0.994, 0.997)
     a = np.zeros(period + 2)
     a[0] = 1.0
     a[period]     = -coeff * 0.5
     a[period + 1] = -coeff * 0.5
     out = lfilter([1.0], a, x)
-    # Extra fast envelope decay for harp feel
-    out *= np.exp(-2.5 * np.linspace(0, 1, n))
-    fade = min(int(0.015 * sr), n)
+    # Gentler decay — let it ring naturally, only slight extra envelope
+    out *= np.exp(-1.0 * np.linspace(0, 1, n))
+    # Short echo (~25ms) for body resonance
+    echo_delay = int(0.025 * sr)
+    if echo_delay < n:
+        out[echo_delay:] += out[:-echo_delay] * 0.18
+    fade = min(int(0.02 * sr), n)
     out[n - fade:] *= np.linspace(1, 0, fade)
     vel = rng.uniform(0.85, 1.15)
-    return (out * 0.75 * vel).astype(np.float32)
+    return (out * 0.72 * vel).astype(np.float32)
 
 
 def _tone_violin(freq: float, duration: float, sr: int, rng: np.random.Generator) -> np.ndarray:
-    """小提琴：鋸齒波諧波，緩慢弓起音，輕微顫音，持音感。"""
+    """小提琴：帶弓擦雜訊的鋸齒波，緩慢起音，顫音。"""
     n = int(sr * duration)
     if n == 0:
         return np.zeros(0, dtype=np.float32)
     t = np.linspace(0, duration, n, endpoint=False)
-    # Vibrato kicks in after attack
-    vib_depth = np.clip(np.linspace(0, 0.006, n), 0, 0.006)
-    vibrato = 1.0 + vib_depth * np.sin(2 * np.pi * 6.0 * t)
-    f_arr = freq * vibrato
-    # Sawtooth-like: rich odd+even harmonics (bowed string)
-    harmonics = [(1, 1.0), (2, 0.5), (3, 0.33), (4, 0.25), (5, 0.20), (6, 0.17), (7, 0.14)]
-    wave = sum(amp * np.sin(2 * np.pi * h * freq * t + rng.uniform(0, 0.3))
-               for h, amp in harmonics)
+    # Vibrato builds up gradually
+    vib_depth = np.clip(np.linspace(0, 0.008, n), 0, 0.008)
+    phase = np.cumsum(2 * np.pi * freq * (1.0 + vib_depth * np.sin(2 * np.pi * 5.8 * t)) / sr)
+    # Sawtooth via harmonic sum — bowed string character
+    harmonics = [(1, 1.0), (2, 0.45), (3, 0.28), (4, 0.18), (5, 0.12), (6, 0.08)]
+    wave = sum(amp * np.sin(h * phase) for h, amp in harmonics)
+    # Bow noise: bandpass noise that fades after attack
+    noise_raw = rng.uniform(-1, 1, n)
+    # Simple bandpass: highpass then lowpass
+    b_hp, a_hp = butter(2, 800 / (sr / 2), btype="high")
+    b_lp, a_lp = butter(2, 3000 / (sr / 2), btype="low")
+    bow_noise = lfilter(b_lp, a_lp, lfilter(b_hp, a_hp, noise_raw))
+    noise_env = np.exp(-6.0 * np.linspace(0, 1, n)) * 0.35  # fades quickly
     # Slow bow attack
-    atk = min(int(0.05 * sr), n)
+    atk = min(int(0.06 * sr), n)
     env = np.ones(n, dtype=np.float32)
-    env[:atk] *= np.linspace(0, 1, atk) ** 2.0
-    # Slight swell
-    swell = 1.0 + 0.1 * np.sin(np.pi * np.linspace(0, 1, n))
+    env[:atk] *= np.linspace(0, 1, atk) ** 1.5
     fade = min(int(0.03 * sr), n)
     env[n - fade:] *= np.linspace(1, 0, fade)
+    combined = (wave + bow_noise * noise_env) * env
     vel = rng.uniform(0.88, 1.12)
-    return (wave * env * swell * 0.22 * vel).astype(np.float32)
+    return (combined * 0.24 * vel).astype(np.float32)
 
 
 def _tone(freq: float, duration: float, sr: int, timbre: str, rng: np.random.Generator) -> np.ndarray:
