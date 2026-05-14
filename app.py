@@ -19,8 +19,10 @@ import soundfile as sf
 import numpy as np
 import subprocess
 import tempfile
+import traceback
 import os
 import shutil
+from scipy.signal import butter, sosfilt, lfilter
 
 # ── Supabase 連線（讀環境變數，HF Spaces Secrets 設定）─────────────────────
 _sb_client = None
@@ -259,7 +261,6 @@ def capo_suggestions(key_str: str) -> str:
 
 
 def process_upload(file):
-    import traceback
     try:
         if not file:
             return "", "", "—", "", ""
@@ -467,7 +468,6 @@ def _synth_chord_sequence(text: str, bpm: int, sr: int,
 
 
 def _lowpass(audio: np.ndarray, sr: int, cutoff: float = 3500.0) -> np.ndarray:
-    from scipy.signal import butter, sosfilt
     sos = butter(4, cutoff / (sr / 2), btype="low", output="sos")
     return sosfilt(sos, audio).astype(np.float32)
 
@@ -496,18 +496,21 @@ def _tone_piano(freq: float, duration: float, sr: int, rng: np.random.Generator)
 
 
 def _tone_guitar(freq: float, duration: float, sr: int, rng: np.random.Generator) -> np.ndarray:
-    """Karplus-Strong plucked string."""
-    period = max(1, int(sr / freq))
+    """Karplus-Strong via IIR filter (scipy.signal.lfilter) — O(n) in C, not Python."""
+    period = max(2, int(sr / freq))
     n = int(sr * duration)
     if n == 0:
         return np.zeros(0, dtype=np.float32)
-    buf = rng.uniform(-1.0, 1.0, period).astype(np.float64)
-    out = np.empty(n, dtype=np.float64)
-    # Slightly randomised decay coefficient for naturalness
+    # Impulse: noise burst for first period, then silence
+    x = np.zeros(n, dtype=np.float64)
+    x[:period] = rng.uniform(-1.0, 1.0, period)
     coeff = rng.uniform(0.994, 0.998)
-    for i in range(n):
-        out[i] = buf[i % period]
-        buf[i % period] = coeff * 0.5 * (buf[i % period] + buf[(i + 1) % period])
+    # y[n] = x[n] + coeff*0.5*y[n-period] + coeff*0.5*y[n-period-1]
+    a = np.zeros(period + 2)
+    a[0] = 1.0
+    a[period]     = -coeff * 0.5
+    a[period + 1] = -coeff * 0.5
+    out = lfilter([1.0], a, x)
     fade = min(int(0.02 * sr), n)
     out[n - fade:] *= np.linspace(1, 0, fade)
     vel = rng.uniform(0.85, 1.15)
@@ -530,7 +533,7 @@ def parse_and_synth(text: str, key: str, bpm: int, octave: int,
     sr = 44100
     beat = 60.0 / bpm
     root_midi = MELODY_KEY_ROOTS.get(key, 60) + (octave - 4) * 12
-    rng = np.random.default_rng(42)
+    rng = np.random.default_rng()
 
     tokens = text.replace("|", " ").split()
     segments: list[np.ndarray] = []
@@ -680,7 +683,6 @@ def _gen_melody(text, key, bpm, octave, timbre, chord_text, time_sig):
 
 
 def download_youtube(url: str, cookies_file: str | None = None):
-    import traceback
     if not url or not url.strip():
         return None, "", "—", "—", "", "", "請輸入 YouTube 連結。"
     try:
@@ -688,8 +690,10 @@ def download_youtube(url: str, cookies_file: str | None = None):
     except ImportError:
         return None, "", "—", "—", "", "", "yt-dlp 未安裝，請聯絡管理員。"
 
-    # Try progressively more permissive client strategies
+    # Try clients in order: tv_embedded and mweb bypass bot detection best on cloud IPs
     strategies = [
+        {"extractor_args": {"youtube": {"player_client": ["tv_embedded"]}}},
+        {"extractor_args": {"youtube": {"player_client": ["mweb"]}}},
         {"extractor_args": {"youtube": {"player_client": ["ios"]}}},
         {"extractor_args": {"youtube": {"player_client": ["android"]}}},
         {"extractor_args": {"youtube": {"player_client": ["web"]}}},
@@ -699,12 +703,18 @@ def download_youtube(url: str, cookies_file: str | None = None):
     out_template = os.path.join(tmpdir, "%(id)s.%(ext)s")
 
     base_opts = {
-        "format": "bestaudio/best",
+        "format": "bestaudio[ext=m4a]/bestaudio/best",
         "outtmpl": out_template,
         "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "wav"}],
         "quiet": True,
         "no_warnings": True,
-        "socket_timeout": 30,
+        "socket_timeout": 60,
+        "http_headers": {
+            "User-Agent": (
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+                "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+            ),
+        },
     }
     if cookies_file and os.path.exists(cookies_file):
         base_opts["cookiefile"] = cookies_file
@@ -712,32 +722,32 @@ def download_youtube(url: str, cookies_file: str | None = None):
 
     last_err = None
     info = None
-    for strategy in strategies:
-        try:
-            ydl_opts = {**base_opts, **strategy}
-            client = strategy["extractor_args"]["youtube"]["player_client"][0]
-            print(f"[pitchpal] yt-dlp trying client={client}: {url!r}")
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-            break
-        except Exception as e:
-            last_err = e
-            print(f"[pitchpal] client={client} failed: {e}")
-            continue
-
-    if info is None:
-        msg = str(last_err)
-        if "Sign in" in msg or "age" in msg.lower():
-            msg = "此影片需要登入或有年齡限制。請匯出瀏覽器 cookies.txt 後上傳再試。"
-        elif "Private" in msg or "private" in msg:
-            msg = "此影片為私人影片，無法下載。"
-        elif "available" in msg.lower() or "geographic" in msg.lower():
-            msg = "此影片在當前地區不可用（地區限制）。"
-        else:
-            msg = f"所有下載方式均失敗：{msg}"
-        return None, "", "—", "—", "", "", f"❌ {msg}"
-
     try:
+        for strategy in strategies:
+            try:
+                ydl_opts = {**base_opts, **strategy}
+                client = strategy["extractor_args"]["youtube"]["player_client"][0]
+                print(f"[pitchpal] yt-dlp trying client={client}: {url!r}")
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                break
+            except Exception as e:
+                last_err = e
+                print(f"[pitchpal] client={client} failed: {e}")
+                continue
+
+        if info is None:
+            msg = str(last_err)
+            if "Sign in" in msg or "age" in msg.lower():
+                msg = "此影片需要登入或有年齡限制。請匯出瀏覽器 cookies.txt 後上傳再試。"
+            elif "Private" in msg or "private" in msg:
+                msg = "此影片為私人影片，無法下載。"
+            elif "available" in msg.lower() or "geographic" in msg.lower():
+                msg = "此影片在當前地區不可用（地區限制）。"
+            else:
+                msg = f"所有下載方式均失敗：{msg}"
+            return None, "", "—", "—", "", "", f"❌ {msg}"
+
         title = info.get("title", "（未知）")
         duration = info.get("duration", 0)
         if duration and duration > 900:
@@ -756,9 +766,17 @@ def download_youtube(url: str, cookies_file: str | None = None):
         rkey = result_key(key, 0)
         capo = capo_suggestions(rkey)
         return audio_path, title, key, f"{conf}%", rkey, capo, f"✅ 下載完成：《{title}》｜偵測調性：{key}"
+
     except Exception as e:
-        print(f"[pitchpal] post-download error:\n{traceback.format_exc()}")
-        return None, "", "—", "—", "", "", f"下載成功但處理失敗：{e}"
+        print(f"[pitchpal] download_youtube error:\n{traceback.format_exc()}")
+        return None, "", "—", "—", "", "", f"下載失敗：{e}"
+    finally:
+        # Clean up tmpdir but keep the wav file if it was returned successfully
+        try:
+            if info is None:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+        except Exception:
+            pass
 
 
 UPLOAD_NOTE = """
