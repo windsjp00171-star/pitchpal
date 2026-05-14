@@ -975,7 +975,6 @@ def append_melody_modifier(melody_text: str, char: str) -> str:
 
 
 _YT_STRATEGIES = [
-    # (client, skip_webpage) — ordered by cloud-IP friendliness
     ("tv_embedded", True),
     ("mweb",        True),
     ("ios",         False),
@@ -983,11 +982,10 @@ _YT_STRATEGIES = [
     ("web",         False),
 ]
 
-_YT_TIMEOUT_SEC = 90   # overall wall-clock limit for the entire download
+_YT_TIMEOUT_SEC = 90
 
 
 def _yt_download_worker(url: str, opts: dict, result: list):
-    """Run in a daemon thread; stores (info, exception) in result[0]."""
     try:
         import yt_dlp
         with yt_dlp.YoutubeDL(opts) as ydl:
@@ -1026,7 +1024,6 @@ def download_youtube(url: str, cookies_file: str | None = None):
     }
     if cookies_file and os.path.exists(cookies_file):
         base_opts["cookiefile"] = cookies_file
-        print(f"[pitchpal] using cookies: {cookies_file}")
 
     info = None
     last_err = None
@@ -1045,28 +1042,26 @@ def download_youtube(url: str, cookies_file: str | None = None):
             t = threading.Thread(target=_yt_download_worker, args=(url, opts, result), daemon=True)
             t.start()
             remaining = max(1.0, deadline - time.time())
-            t.join(timeout=min(30.0, remaining))   # per-strategy cap 30s
+            t.join(timeout=min(30.0, remaining))
             if result:
                 got_info, err = result[0]
                 if got_info is not None:
                     info = got_info
                     break
                 last_err = err
-                print(f"[pitchpal] client={client} failed: {err}")
             else:
                 last_err = Exception(f"client={client} 無回應（超時）")
-                print(f"[pitchpal] {last_err}")
 
         if info is None:
             msg = str(last_err) if last_err else "未知錯誤"
             if "Sign in" in msg or "age" in msg.lower() or "login" in msg.lower():
-                tip = "此影片需要登入或年齡限制。上傳瀏覽器 cookies.txt 後再試。"
+                tip = "此影片需要登入或年齡限制，請上傳 cookies.txt 後再試。"
             elif "private" in msg.lower():
                 tip = "此影片為私人影片，無法存取。"
             elif "geographic" in msg.lower() or "available" in msg.lower():
-                tip = "此影片有地區限制，伺服器所在地區無法存取。"
+                tip = "此影片有地區限制，伺服器所在地無法存取。"
             elif "超時" in msg or "無回應" in msg:
-                tip = f"連線超時（{msg}）。YouTube 在雲端伺服器上有封鎖，請改用 cookies.txt 或直接上傳音檔。"
+                tip = "連線超時，YouTube 在雲端伺服器上有封鎖，建議直接上傳音檔。"
             else:
                 tip = f"所有方式均失敗：{msg[:120]}"
             return None, "", "—", "—", "", "", f"❌ {tip}"
@@ -1085,7 +1080,6 @@ def download_youtube(url: str, cookies_file: str | None = None):
             return None, "", "—", "—", "", "", "音頻擷取失敗，請確認影片包含音軌。"
 
         _reg_tmp(audio_path)
-        print(f"[pitchpal] yt ok → {audio_path}")
         key, conf = detect_key(audio_path)
         rkey = result_key(key, 0)
         capo = capo_suggestions(rkey)
