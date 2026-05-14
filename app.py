@@ -92,8 +92,12 @@ NOTE_MAP = {
 GUITAR_KEYS = [("C", 0), ("D", 2), ("E", 4), ("G", 7), ("A", 9)]
 
 CSS = """
-.gradio-container { max-width: 900px !important; margin: auto; }
-#capo-box textarea { font-family: monospace; font-size: 0.95em; }
+.gradio-container { max-width: 960px !important; margin: auto; }
+#capo-box textarea { font-family: monospace; font-size: 0.9em; }
+.section-header { font-size: 0.75em; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; color: #6b7280; margin-bottom: 4px !important; }
+.result-row { background: #f9fafb; border-radius: 8px; padding: 12px; }
+footer { display: none !important; }
 """
 
 
@@ -795,61 +799,68 @@ UPLOAD_NOTE = """
 > **檔案上限：** 音頻 50 MB｜影片 200 MB｜長度 10 分鐘以內
 """
 
-with gr.Blocks(title="PitchPal — 音樂 Key 辨別與移調工具", css=CSS) as demo:
-    gr.Markdown("""# 🎵 PitchPal — 音樂 Key 辨別與移調工具
-專為敬拜帶領者設計。上傳音頻或貼 YouTube 連結，自動辨別調性，一鍵移調到你唱得到的 Key，並提供吉他 Capo 建議。""")
+with gr.Blocks(title="PitchPal", css=CSS) as demo:
+    gr.Markdown("# 🎵 PitchPal\n敬拜帶領者的移調工具 — 辨調、移調、Capo 建議、旋律試聽，一站完成。")
 
     with gr.Tabs():
 
-        # ── Tab 1：移調工具 ───────────────────────────────────────────────────
+        # ── Tab 1：移調工具 ──────────────────────────────────────────────────
         with gr.Tab("🎚️ 移調工具"):
-            gr.Markdown("""**使用流程：** 上傳音頻（或貼 YouTube 連結）→ 自動偵測調性 → 輸入要移幾個半音 → 下載移調後的音頻
+            with gr.Row(equal_height=False):
 
-> 升一個半音 = +1，降一個半音 = −1。例如原曲 G 調想改成 A 調 = +2。""")
-            with gr.Row():
-                with gr.Column(scale=1):
-                    with gr.Group():
-                        gr.Markdown("**▶ 從 YouTube 下載**\n貼上連結後按「下載並分析」，會自動下載音頻並偵測調性。\n\n> ⚠️ 請確認你對該內容擁有合法授權（購買、CCLI 授權或版權方許可）。本工具僅供移調分析用途，使用者須自行承擔內容授權責任。")
-                        with gr.Row():
-                            yt_url_box = gr.Textbox(
-                                label="YouTube 連結",
-                                placeholder="https://www.youtube.com/watch?v=...",
-                                scale=4,
+                # ── 左欄：輸入 ──────────────────────────────────────────────
+                with gr.Column(scale=5):
+
+                    # 區塊 1：音源
+                    gr.Markdown("**音源**", elem_classes="section-header")
+                    with gr.Tabs():
+                        with gr.Tab("上傳檔案"):
+                            audio_input = gr.Audio(
+                                type="filepath",
+                                sources=["upload"],
                                 show_label=False,
                             )
-                            yt_btn = gr.Button("下載並分析", variant="secondary", scale=1)
-                        yt_status_box = gr.Textbox(
-                            label="下載狀態",
-                            interactive=False,
-                            show_label=False,
-                        )
-                        with gr.Accordion("遇到下載限制？上傳 cookies.txt", open=False):
                             gr.Markdown(
-                                "若遇到「需要登入」或「年齡限制」錯誤，"
-                                "可用瀏覽器擴充套件（如 **Get cookies.txt LOCALLY**）"
-                                "匯出 YouTube 的 cookies.txt，上傳後再試。"
+                                "<small>支援 MP3、WAV、M4A、FLAC、MP4、MKV｜音頻 50 MB / 影片 200 MB / 10 分鐘以內</small>",
                             )
-                            yt_cookies_file = gr.File(
-                                label="cookies.txt（選填）",
-                                file_types=[".txt"],
-                                type="filepath",
+                        with gr.Tab("YouTube 連結"):
+                            with gr.Row():
+                                yt_url_box = gr.Textbox(
+                                    placeholder="https://www.youtube.com/watch?v=...",
+                                    show_label=False,
+                                    scale=4,
+                                )
+                                yt_btn = gr.Button("下載並分析", scale=1)
+                            yt_status_box = gr.Textbox(
+                                show_label=False, interactive=False,
+                                placeholder="下載狀態…",
                             )
-                    audio_input = gr.Audio(
-                        label="或直接上傳音頻（mp3 / wav / m4a / flac）",
-                        type="filepath",
-                        sources=["upload"],
-                    )
-                    gr.Markdown(UPLOAD_NOTE)
+                            with gr.Accordion("遇到下載限制？", open=False):
+                                gr.Markdown(
+                                    "用 **Get cookies.txt LOCALLY** 擴充套件匯出 YouTube cookies.txt 後上傳，"
+                                    "可解決「需要登入」或「年齡限制」的問題。"
+                                )
+                                yt_cookies_file = gr.File(
+                                    label="cookies.txt",
+                                    file_types=[".txt"],
+                                    type="filepath",
+                                )
+                            gr.Markdown(
+                                "<small>⚠️ 請確認你對該內容擁有合法授權（購買、CCLI 或版權方許可）。本工具僅供移調分析，授權責任由使用者自行承擔。</small>"
+                            )
+
+                    # 區塊 2：分析結果
+                    gr.Markdown("**分析結果**", elem_classes="section-header")
                     filename_box = gr.Textbox(
-                        label="檔案名稱",
+                        label="檔案 / 影片名稱",
                         interactive=False,
-                        placeholder="上傳後顯示…",
+                        placeholder="上傳或下載後顯示…",
                     )
                     with gr.Row():
                         detected_key_box = gr.Textbox(
                             label="原曲調性",
                             interactive=False,
-                            placeholder="上傳後自動顯示…",
+                            placeholder="自動偵測…",
                             scale=3,
                         )
                         confidence_box = gr.Textbox(
@@ -858,55 +869,64 @@ with gr.Blocks(title="PitchPal — 音樂 Key 辨別與移調工具", css=CSS) a
                             value="—",
                             scale=1,
                         )
-                    steps_slider = gr.Number(
-                        label="移調半音數（負數 = 降Key，正數 = 升Key）",
-                        minimum=-12,
-                        maximum=12,
-                        step=1,
-                        value=0,
-                        precision=0,
-                    )
-                    result_key_box = gr.Textbox(
-                        label="移調後調性",
-                        interactive=False,
-                        placeholder="—",
-                    )
+
+                    # 區塊 3：移調設定
+                    gr.Markdown("**移調設定**", elem_classes="section-header")
+                    with gr.Row():
+                        steps_slider = gr.Number(
+                            label="半音數（+ 升調 / − 降調）",
+                            minimum=-12, maximum=12, step=1, value=0, precision=0,
+                            scale=2,
+                        )
+                        result_key_box = gr.Textbox(
+                            label="移調後調性",
+                            interactive=False,
+                            placeholder="—",
+                            scale=3,
+                        )
                     capo_box = gr.Textbox(
                         label="🎸 Capo 建議（吉他）",
                         interactive=False,
                         lines=3,
                         elem_id="capo-box",
                     )
-                    output_fmt_radio = gr.Radio(
-                        label="輸出格式",
-                        choices=OUTPUT_FORMATS,
-                        value="WAV",
-                    )
-                    transpose_btn = gr.Button("開始移調", variant="primary", size="lg")
+                    with gr.Row():
+                        output_fmt_radio = gr.Radio(
+                            label="輸出格式",
+                            choices=OUTPUT_FORMATS,
+                            value="WAV",
+                            scale=1,
+                        )
+                        transpose_btn = gr.Button(
+                            "開始移調", variant="primary", size="lg", scale=2,
+                        )
 
-                with gr.Column(scale=1):
-                    status_box = gr.Textbox(label="狀態訊息", interactive=False)
+                # ── 右欄：輸出 ──────────────────────────────────────────────
+                with gr.Column(scale=5):
+                    gr.Markdown("**移調結果**", elem_classes="section-header")
+                    status_box = gr.Textbox(
+                        label="狀態", interactive=False, placeholder="移調完成後顯示…"
+                    )
                     audio_output = gr.Audio(label="移調後音頻", type="filepath")
 
-                    gr.Markdown("---")
-                    gr.Markdown("""**偵測結果不正確？幫我們改善準確率 🙏**
+                    gr.Markdown("<br>")
+                    with gr.Accordion("偵測結果不正確？回報給我們 🙏", open=False):
+                        gr.Markdown(
+                            "調性辨識對清晰樂器準確率較高。人聲為主、有混響或多次轉調的曲目偵測準確率會下降。"
+                            "\n\n選擇正確調性後按「回報修正」即可，不需要登入，感謝幫助改善工具。"
+                        )
+                        feedback_key = gr.Dropdown(
+                            label="正確調性", choices=ALL_KEYS, value=None,
+                        )
+                        feedback_notes = gr.Textbox(
+                            label="備註（選填）",
+                            placeholder="例如：這首歌有轉調…",
+                            lines=1,
+                        )
+                        feedback_btn = gr.Button("回報修正", variant="secondary")
+                        feedback_status = gr.Textbox(label="回報狀態", interactive=False)
 
-調性辨識使用 Krumhansl-Schmuckler 音調輪廓演算法，對清晰的單一樂器效果最好。若原曲有大量人聲、混響或多次轉調，偵測準確率會下降。
-
-每一筆回報都會被記錄下來，累積後用來優化演算法。_填入正確調性後按「回報修正」即可，不需要登入。_""")
-                    feedback_key = gr.Dropdown(
-                        label="正確調性",
-                        choices=ALL_KEYS,
-                        value=None,
-                    )
-                    feedback_notes = gr.Textbox(
-                        label="備註（選填）",
-                        placeholder="例如：這首歌有轉調…",
-                        lines=1,
-                    )
-                    feedback_btn = gr.Button("回報修正", variant="secondary")
-                    feedback_status = gr.Textbox(label="回報狀態", interactive=False)
-
+            # ── 事件綁定 ────────────────────────────────────────────────────
             yt_btn.click(
                 fn=download_youtube,
                 inputs=[yt_url_box, yt_cookies_file],
@@ -917,7 +937,8 @@ with gr.Blocks(title="PitchPal — 音樂 Key 辨別與移調工具", css=CSS) a
             audio_input.change(
                 fn=process_upload,
                 inputs=[audio_input],
-                outputs=[filename_box, detected_key_box, confidence_box, result_key_box, capo_box],
+                outputs=[filename_box, detected_key_box, confidence_box,
+                         result_key_box, capo_box],
                 api_name="process_upload",
             )
             steps_slider.change(
@@ -940,65 +961,47 @@ with gr.Blocks(title="PitchPal — 音樂 Key 辨別與移調工具", css=CSS) a
                 api_name="submit_feedback",
             )
 
-        # ── Tab 2：旋律試聽 ───────────────────────────────────────────────────
+        # ── Tab 2：旋律試聽 ──────────────────────────────────────────────────
         with gr.Tab("🎼 旋律試聽"):
-            gr.Markdown("""輸入旋律或和弦（或兩者），生成試聽音頻，方便確認音調、編排敬拜流程。
-
-**旋律**用數字簡譜輸入（1=Do, 2=Re … 7=Ti），**調性**選這首歌的 1 對應哪個音（例如 G 調就選 G）。**和弦**照著你手上的譜貼，用 `|` 分小節，同一小節的和弦自動平均分拍。""")
-            with gr.Row():
-                with gr.Column(scale=1):
+            with gr.Row(equal_height=False):
+                with gr.Column(scale=5):
+                    gr.Markdown("**旋律**", elem_classes="section-header")
                     melody_input = gr.Textbox(
-                        label="旋律（簡譜）",
+                        label="數字簡譜（1=Do … 7=Ti，選填）",
                         placeholder="5 6 7 5 3 - - - | 7 5 6 - | 4# 5 6 4# 2 - | 6 4# 5 -",
                         lines=3,
                     )
+                    gr.Markdown("**和弦**", elem_classes="section-header")
                     chord_input = gr.Textbox(
-                        label="和弦進行（選填）",
+                        label="和弦進行（選填）— 用 | 分小節，同小節和弦自動平均分拍",
                         placeholder="C Em7 | D | G/B | Em7 D",
                         lines=2,
                     )
+                    gr.Markdown("**設定**", elem_classes="section-header")
                     with gr.Row():
                         melody_key = gr.Dropdown(
                             label="調性（1 = ?）",
-                            choices=MELODY_KEYS,
-                            value="G",
-                            scale=1,
+                            choices=MELODY_KEYS, value="G", scale=1,
                         )
                         melody_bpm = gr.Slider(
-                            label="BPM",
-                            minimum=40,
-                            maximum=200,
-                            step=1,
-                            value=80,
-                            scale=2,
+                            label="BPM", minimum=40, maximum=200, step=1, value=80, scale=2,
                         )
                         melody_octave = gr.Slider(
-                            label="八度（4 = 中央）",
-                            minimum=2,
-                            maximum=6,
-                            step=1,
-                            value=4,
-                            scale=1,
+                            label="八度", minimum=2, maximum=6, step=1, value=4, scale=1,
                         )
                     with gr.Row():
                         melody_timbre = gr.Radio(
-                            label="音色",
-                            choices=["鋼琴", "吉他"],
-                            value="鋼琴",
-                            scale=2,
+                            label="音色", choices=["鋼琴", "吉他"], value="鋼琴", scale=2,
                         )
                         time_sig_radio = gr.Radio(
-                            label="拍號",
-                            choices=["4/4", "3/4"],
-                            value="4/4",
-                            scale=1,
+                            label="拍號", choices=["4/4", "3/4"], value="4/4", scale=1,
                         )
-                    melody_btn = gr.Button("生成旋律", variant="primary", size="lg")
+                    melody_btn = gr.Button("生成試聽", variant="primary", size="lg")
 
-                with gr.Column(scale=1):
+                with gr.Column(scale=5):
                     gr.Markdown(JIANPU_HELP)
                     melody_status = gr.Textbox(label="狀態", interactive=False)
-                    melody_output = gr.Audio(label="旋律音頻", type="filepath")
+                    melody_output = gr.Audio(label="試聽音頻", type="filepath")
 
             melody_btn.click(
                 fn=_gen_melody,
