@@ -122,6 +122,7 @@ OUTPUT_FORMATS = ["WAV", "MP3"]
 FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None
 
 VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+FFMPEG_CONVERT_EXTS = {".opus", ".ogg", ".webm", ".aac", ".wma", ".flac"}
 MAX_AUDIO_MB = 50
 MAX_VIDEO_MB = 200
 MAX_DURATION_SEC = 600  # 10 minutes
@@ -257,9 +258,12 @@ def _prepare_audio(file_path: str) -> tuple[str, bool]:
         kind = "影片" if is_video else "音頻"
         raise ValueError(f"{kind}檔案過大（{size_mb:.0f} MB），上限為 {limit_mb} MB。")
 
-    if is_video:
+    if is_video or ext in FFMPEG_CONVERT_EXTS:
         if not FFMPEG_AVAILABLE:
-            raise ValueError("伺服器未安裝 ffmpeg，無法處理影片檔案。")
+            if is_video:
+                raise ValueError("伺服器未安裝 ffmpeg，無法處理影片檔案。")
+            # Fallback: let librosa try directly
+            return file_path, False
         audio_path = _extract_audio_from_video(file_path)
         return audio_path, True
 
