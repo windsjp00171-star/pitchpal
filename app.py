@@ -1143,8 +1143,86 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
         with gr.Tab("🎼 旋律試聽"):
             mod_state = gr.State(_MOD_INIT)
 
-            # ── 設定列（最頂部，橫向緊湊） ──────────────────────────────────
-            gr.Markdown("**設定**", elem_classes="section-header")
+            # ── 範例（折疊在最上） ────────────────────────────────────────
+            with gr.Accordion("📖 輸入範例 & 格式說明", open=False):
+                gr.Markdown(JIANPU_HELP)
+
+            # ── 步驟一：旋律 + 和弦並排 ──────────────────────────────────
+            gr.Markdown(
+                "<div style='color:#6b7280;font-size:0.85em;margin:10px 0 4px'>步驟一：填入旋律或和弦（兩者皆選填，可單獨使用）</div>"
+            )
+            with gr.Row(equal_height=False):
+
+                # ── 旋律欄 ────────────────────────────────────────────────
+                with gr.Column(scale=5):
+                    gr.Markdown("**🎵 旋律**", elem_classes="section-header")
+                    with gr.Row():
+                        note_mode = gr.Radio(
+                            choices=["只試音", "加入輸入框"], value="只試音",
+                            show_label=False, scale=2,
+                        )
+                        note_preview = gr.Audio(
+                            label="", type="filepath",
+                            show_download_button=False, autoplay=True, scale=3,
+                        )
+                    with gr.Row(elem_classes="note-palette"):
+                        note_btn_1 = gr.Button("1", size="sm")
+                        note_btn_2 = gr.Button("2", size="sm")
+                        note_btn_3 = gr.Button("3", size="sm")
+                        note_btn_4 = gr.Button("4", size="sm")
+                        note_btn_5 = gr.Button("5", size="sm")
+                        note_btn_6 = gr.Button("6", size="sm")
+                        note_btn_7 = gr.Button("7", size="sm")
+                        note_btn_0 = gr.Button("0 休", size="sm")
+                    with gr.Row(elem_classes="mod-palette"):
+                        mod_sharp  = gr.Button("# 升",  size="sm", variant="secondary")
+                        mod_high   = gr.Button("' 高八", size="sm", variant="secondary")
+                        mod_low    = gr.Button(", 低八", size="sm", variant="secondary")
+                        mod_extend = gr.Button("- 延音", size="sm")
+                        mod_bar_m  = gr.Button("| 小節", size="sm")
+                    melody_input = gr.Textbox(
+                        label="數字簡譜",
+                        placeholder="5 6 7 5 3 - - - | 7 5 6 -",
+                        lines=3,
+                    )
+
+                # ── 和弦欄 ────────────────────────────────────────────────
+                with gr.Column(scale=5):
+                    gr.Markdown("**🎸 和弦**", elem_classes="section-header")
+                    with gr.Row():
+                        chord_mode = gr.Radio(
+                            choices=["只試音", "加入輸入框"], value="只試音",
+                            show_label=False, scale=2,
+                        )
+                        chord_preview = gr.Audio(
+                            label="", type="filepath",
+                            show_download_button=False, autoplay=True, scale=3,
+                        )
+                    with gr.Row():
+                        chord_quality_radio = gr.Radio(
+                            choices=["基本", "7", "maj7", "sus4", "add9"],
+                            value="基本", label="延伸音", scale=3,
+                        )
+                        barline_btn = gr.Button("| 小節線", size="sm", scale=1)
+                    _init_chords = get_diatonic_chords("G")
+                    with gr.Row(elem_classes="chord-palette"):
+                        chord_btn_1 = gr.Button(_init_chords[0], size="sm")
+                        chord_btn_2 = gr.Button(_init_chords[1], size="sm")
+                        chord_btn_3 = gr.Button(_init_chords[2], size="sm")
+                        chord_btn_4 = gr.Button(_init_chords[3], size="sm")
+                        chord_btn_5 = gr.Button(_init_chords[4], size="sm")
+                        chord_btn_6 = gr.Button(_init_chords[5], size="sm")
+                        chord_btn_7 = gr.Button(_init_chords[6], size="sm")
+                    chord_input = gr.Textbox(
+                        label="和弦進行（用 | 分小節）",
+                        placeholder="C Em7 | D | G/B | Em7 D",
+                        lines=3,
+                    )
+
+            # ── 步驟二：設定 + 生成 ───────────────────────────────────────
+            gr.Markdown(
+                "<div style='color:#6b7280;font-size:0.85em;margin:14px 0 4px'>步驟二：設定參數後生成</div>"
+            )
             with gr.Row():
                 melody_key = gr.Dropdown(
                     label="調性（1=?）", choices=MELODY_KEYS, value="G", scale=1,
@@ -1161,82 +1239,9 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                 time_sig_radio = gr.Radio(
                     label="拍號", choices=["4/4", "3/4"], value="4/4", scale=1,
                 )
-
-            # ── 旋律調色盤 ────────────────────────────────────────────────
-            gr.Markdown("**旋律調色盤**", elem_classes="section-header")
-            with gr.Row():
-                note_mode = gr.Radio(
-                    choices=["只試音", "加入輸入框"], value="只試音",
-                    show_label=False, scale=2,
-                )
-                note_preview = gr.Audio(
-                    label="", type="filepath",
-                    show_download_button=False, autoplay=True, scale=3,
-                )
-            with gr.Row(elem_classes="note-palette"):
-                note_btn_1 = gr.Button("1", size="sm")
-                note_btn_2 = gr.Button("2", size="sm")
-                note_btn_3 = gr.Button("3", size="sm")
-                note_btn_4 = gr.Button("4", size="sm")
-                note_btn_5 = gr.Button("5", size="sm")
-                note_btn_6 = gr.Button("6", size="sm")
-                note_btn_7 = gr.Button("7", size="sm")
-                note_btn_0 = gr.Button("0 休", size="sm")
-            with gr.Row(elem_classes="mod-palette"):
-                mod_sharp  = gr.Button("# 升",  size="sm", variant="secondary")
-                mod_high   = gr.Button("' 高八", size="sm", variant="secondary")
-                mod_low    = gr.Button(", 低八", size="sm", variant="secondary")
-                mod_extend = gr.Button("- 延音", size="sm")
-                mod_bar_m  = gr.Button("| 小節", size="sm")
-
-            # ── 旋律輸入框 ────────────────────────────────────────────────
-            melody_input = gr.Textbox(
-                label="旋律（數字簡譜，選填）",
-                placeholder="5 6 7 5 3 - - - | 7 5 6 - | 4# 5 6 4# 2 - | 6 4# 5 -",
-                lines=2,
-            )
-
-            # ── 和弦調色盤 ────────────────────────────────────────────────
-            gr.Markdown("**和弦調色盤**", elem_classes="section-header")
-            with gr.Row():
-                chord_mode = gr.Radio(
-                    choices=["只試音", "加入輸入框"], value="只試音",
-                    show_label=False, scale=2,
-                )
-                chord_quality_radio = gr.Radio(
-                    choices=["基本", "7", "maj7", "sus4", "add9"],
-                    value="基本", label="延伸音", scale=3,
-                )
-                barline_btn = gr.Button("| 小節線", size="sm", scale=1)
-                chord_preview = gr.Audio(
-                    label="", type="filepath",
-                    show_download_button=False, autoplay=True, scale=3,
-                )
-            _init_chords = get_diatonic_chords("G")
-            with gr.Row(elem_classes="chord-palette"):
-                chord_btn_1 = gr.Button(_init_chords[0], size="sm")
-                chord_btn_2 = gr.Button(_init_chords[1], size="sm")
-                chord_btn_3 = gr.Button(_init_chords[2], size="sm")
-                chord_btn_4 = gr.Button(_init_chords[3], size="sm")
-                chord_btn_5 = gr.Button(_init_chords[4], size="sm")
-                chord_btn_6 = gr.Button(_init_chords[5], size="sm")
-                chord_btn_7 = gr.Button(_init_chords[6], size="sm")
-
-            # ── 和弦輸入框 ────────────────────────────────────────────────
-            chord_input = gr.Textbox(
-                label="和弦進行（選填）— 用 | 分小節，同小節和弦平均分拍",
-                placeholder="C Em7 | D | G/B | Em7 D",
-                lines=2,
-            )
-
-            # ── 生成 + 輸出 ───────────────────────────────────────────────
             melody_btn = gr.Button("🎵 生成試聽", variant="primary", size="lg")
             melody_status = gr.Textbox(label="狀態", interactive=False)
             melody_output = gr.Audio(label="試聽音頻", type="filepath")
-
-            # ── 格式說明 ──────────────────────────────────────────────────
-            with gr.Accordion("📖 格式說明", open=False):
-                gr.Markdown(JIANPU_HELP)
 
             # ── 事件綁定 ──────────────────────────────────────────────────
             melody_btn.click(
