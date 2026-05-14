@@ -449,9 +449,10 @@ def _convert_to_mp3(wav_path: str, stem: str = "audio") -> str:
     return _reg_tmp(out_path)
 
 
-def transpose_audio(file, detected_key, steps, output_fmt):
+def transpose_audio(file, detected_key, steps, output_fmt, key_override="（使用自動偵測）"):
     if not file:
         return None, "請先上傳音頻檔案。"
+    effective_key = detected_key if (not key_override or key_override == "（使用自動偵測）") else key_override
 
     file_path = _resolve_path(file)
     if not file_path:
@@ -497,9 +498,10 @@ def transpose_audio(file, detected_key, steps, output_fmt):
 
         if steps == 0:
             msg = f"無移調，已輸出為 {output_fmt}。"
-        elif detected_key and not detected_key.startswith("偵測失敗"):
-            rkey = result_key(detected_key, steps)
-            msg = f"移調完成：{detected_key} → {rkey}（{direction} 個半音）｜格式：{output_fmt}"
+        elif effective_key and not effective_key.startswith("偵測失敗"):
+            rkey = result_key(effective_key, steps)
+            src_label = effective_key + ("（手動修正）" if key_override and key_override != "（使用自動偵測）" else "")
+            msg = f"移調完成：{src_label} → {rkey}（{direction} 個半音）｜格式：{output_fmt}"
         else:
             msg = f"移調完成：{direction} 個半音｜格式：{output_fmt}"
         return out_path, msg
@@ -1486,7 +1488,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                     )
                     with gr.Row():
                         detected_key_box = gr.Textbox(
-                            label="原曲調性",
+                            label="原曲調性（自動偵測）",
                             interactive=False,
                             placeholder="自動偵測…",
                             scale=3,
@@ -1497,6 +1499,11 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                             value="—",
                             scale=1,
                         )
+                    key_override = gr.Dropdown(
+                        label="手動修正原 Key（偵測有誤時使用）",
+                        choices=["（使用自動偵測）"] + ALL_KEYS,
+                        value="（使用自動偵測）",
+                    )
                     gr.Markdown("<br>")
                     with gr.Accordion("偵測結果不正確？回報給我們 🙏", open=False):
                         gr.Markdown(
@@ -1572,15 +1579,24 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                 api_name="process_upload",
                 show_progress="minimal",
             )
+            def _on_slider_with_override(detected_key, steps, override):
+                effective_key = detected_key if (not override or override == "（使用自動偵測）") else override
+                return on_slider_change(effective_key, steps)
+
             steps_slider.change(
-                fn=on_slider_change,
-                inputs=[detected_key_box, steps_slider],
+                fn=_on_slider_with_override,
+                inputs=[detected_key_box, steps_slider, key_override],
                 outputs=[result_key_box, capo_box],
                 api_name="on_slider_change",
             )
+            key_override.change(
+                fn=_on_slider_with_override,
+                inputs=[detected_key_box, steps_slider, key_override],
+                outputs=[result_key_box, capo_box],
+            )
             transpose_btn.click(
                 fn=transpose_audio,
-                inputs=[audio_input, detected_key_box, steps_slider, output_fmt_radio],
+                inputs=[audio_input, detected_key_box, steps_slider, output_fmt_radio, key_override],
                 outputs=[audio_output, status_box],
                 api_name="transpose_audio",
                 show_progress="full",
