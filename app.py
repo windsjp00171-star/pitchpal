@@ -1119,7 +1119,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                         mod_bar    = gr.Button("| 小節", size="sm")
                     note_preview = gr.Audio(
                         label="音符試聽", type="filepath",
-                        show_download_button=False,
+                        show_download_button=False, autoplay=True,
                     )
 
                     # 旋律文字輸入
@@ -1156,7 +1156,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                         chord_btn_7 = gr.Button(_init_chords[6], size="sm")
                     chord_preview = gr.Audio(
                         label="和弦試聽", type="filepath",
-                        show_download_button=False,
+                        show_download_button=False, autoplay=True,
                     )
 
                     # 和弦文字輸入
