@@ -266,13 +266,17 @@ def _prepare_audio(file_path: str) -> tuple[str, bool]:
     return file_path, False
 
 
+_KS_MAJOR = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09,
+                       2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
+_KS_MINOR = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53,
+                       2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
+_LOWPASS_SOS = butter(4, 3500.0 / (44100 / 2), btype="low", output="sos")
+_RNG = np.random.default_rng()
+
+
 def _ks_scores(chroma_mean: np.ndarray) -> tuple[list, list]:
-    major_profile = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09,
-                               2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
-    minor_profile = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53,
-                               2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
-    major = [np.corrcoef(np.roll(major_profile, i), chroma_mean)[0, 1] for i in range(12)]
-    minor = [np.corrcoef(np.roll(minor_profile, i), chroma_mean)[0, 1] for i in range(12)]
+    major = [np.corrcoef(np.roll(_KS_MAJOR, i), chroma_mean)[0, 1] for i in range(12)]
+    minor = [np.corrcoef(np.roll(_KS_MINOR, i), chroma_mean)[0, 1] for i in range(12)]
     return major, minor
 
 
@@ -593,7 +597,7 @@ def _synth_chord_sequence(text: str, bpm: int, sr: int,
 
 
 def _lowpass(audio: np.ndarray, sr: int, cutoff: float = 3500.0) -> np.ndarray:
-    sos = butter(4, cutoff / (sr / 2), btype="low", output="sos")
+    sos = _LOWPASS_SOS if (sr == 44100 and cutoff == 3500.0) else butter(4, cutoff / (sr / 2), btype="low", output="sos")
     return sosfilt(sos, audio).astype(np.float32)
 
 
@@ -658,7 +662,6 @@ def parse_and_synth(text: str, key: str, bpm: int, octave: int,
     sr = 44100
     beat = 60.0 / bpm
     root_midi = MELODY_KEY_ROOTS.get(key, 60) + (octave - 4) * 12
-    rng = np.random.default_rng()
 
     tokens = text.replace("|", " ").split()
     segments: list[np.ndarray] = []
@@ -671,7 +674,7 @@ def parse_and_synth(text: str, key: str, bpm: int, octave: int,
         # Standalone dash = extend previous note
         if tok.lstrip("-") == "" and last_freq is not None:
             extra = len(tok)
-            segments.append(_tone(last_freq, beat * extra, sr, timbre, rng))
+            segments.append(_tone(last_freq, beat * extra, sr, timbre, _RNG))
             continue
 
         # Rest
@@ -702,7 +705,7 @@ def parse_and_synth(text: str, key: str, bpm: int, octave: int,
         midi = root_midi + semitone + oct_shift * 12
         freq = 440.0 * (2 ** ((midi - 69) / 12))
         last_freq = freq
-        segments.append(_tone(freq, beat * (1 + extra_beats), sr, timbre, rng))
+        segments.append(_tone(freq, beat * (1 + extra_beats), sr, timbre, _RNG))
 
     has_chords = bool(chord_text and chord_text.strip())
 
@@ -715,7 +718,7 @@ def parse_and_synth(text: str, key: str, bpm: int, octave: int,
         melody_audio = np.zeros(0, dtype=np.float32)
 
     if has_chords:
-        chord_audio = _synth_chord_sequence(chord_text, bpm, sr, rng, beats_per_bar)
+        chord_audio = _synth_chord_sequence(chord_text, bpm, sr, _RNG, beats_per_bar)
         if len(melody_audio) == 0:
             audio = chord_audio
         else:
@@ -783,7 +786,7 @@ def _submit_feedback(file, detected, conf_str, corrected, notes):
         filename = os.path.basename(p) if p else ""
     try:
         conf = int("".join(c for c in conf_str if c.isdigit()))
-    except Exception:
+    except ValueError:
         conf = None
     return submit_feedback(filename, detected, corrected, conf, notes)
 
@@ -811,13 +814,10 @@ def _gen_melody(text, key, bpm, octave, timbre, chord_text, time_sig):
 # ── 和弦調色盤 ────────────────────────────────────────────────────────────────
 
 def _audio_html(path: str | None) -> str:
-    """Return an invisible autoplay <audio> with base64-encoded WAV (no file-serving dependency)."""
     if not path:
         return ""
-    buf = io.BytesIO()
-    data, sr = sf.read(path, dtype="float32")
-    sf.write(buf, data, sr, format="WAV")
-    b64 = base64.b64encode(buf.getvalue()).decode()
+    with open(path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode()
     uid = os.urandom(4).hex()
     return (
         f'<audio id="pp{uid}" autoplay style="display:none">'
@@ -841,14 +841,7 @@ def get_diatonic_chords(key: str) -> list[str]:
     return result
 
 
-def play_chord_audio(chord_name: str) -> str | None:
-    notes = _parse_chord_token(chord_name)
-    if not notes:
-        return None
-    rng = np.random.default_rng()
-    sr = 44100
-    audio = _synth_chord_block(notes, 1.5, sr, rng)
-    audio = _lowpass(audio, sr)
+def _write_normalized(audio: np.ndarray, sr: int) -> str:
     peak = np.max(np.abs(audio))
     if peak > 0:
         audio = audio / peak * 0.85
@@ -857,6 +850,16 @@ def play_chord_audio(chord_name: str) -> str | None:
     _reg_tmp(path)
     sf.write(path, audio, sr)
     return path
+
+
+def play_chord_audio(chord_name: str) -> str | None:
+    notes = _parse_chord_token(chord_name)
+    if not notes:
+        return None
+    sr = 44100
+    audio = _synth_chord_block(notes, 1.5, sr, _RNG)
+    audio = _lowpass(audio, sr)
+    return _write_normalized(audio, sr)
 
 
 def _apply_quality_mod(chord: str, mod: str) -> str:
@@ -942,18 +945,10 @@ def _play_note_with_mods(note_digit: str, key: str, octave: int,
     oct_shift = (1 if high else 0) - (1 if low else 0)
     midi = root_midi + semitone + oct_shift * 12
     freq = 440.0 * (2 ** ((midi - 69) / 12))
-    rng = np.random.default_rng()
     sr = 44100
-    audio = _tone(freq, 0.8, sr, timbre, rng)
+    audio = _tone(freq, 0.8, sr, timbre, _RNG)
     audio = _lowpass(audio, sr)
-    peak = np.max(np.abs(audio))
-    if peak > 0:
-        audio = audio / peak * 0.85
-    fd, path = tempfile.mkstemp(suffix=".wav")
-    os.close(fd)
-    _reg_tmp(path)
-    sf.write(path, audio, sr)
-    return path
+    return _write_normalized(audio, sr)
 
 
 def _make_note_handler(digit: str):
@@ -969,7 +964,6 @@ def _make_note_handler(digit: str):
             new_text = melody_text.rstrip() + sep + tok
         else:
             new_text = melody_text
-        # All modifiers are sticky — user toggles manually, no auto-reset
         return html, new_text
     return _h
 
