@@ -1122,6 +1122,10 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                                 "<small>支援 MP3、WAV、M4A、FLAC、MP4、MKV｜音頻 50 MB / 影片 200 MB / 10 分鐘以內</small>",
                             )
                         with gr.Tab("YouTube 連結"):
+                            gr.Markdown(
+                                "<small>⚡ 建議直接上傳音檔——雲端伺服器 IP 常被 YouTube 限制，連結分析成功率約 40–60%，"
+                                "若持續失敗請改用「上傳檔案」。</small>"
+                            )
                             with gr.Row():
                                 yt_url_box = gr.Textbox(
                                     placeholder="https://www.youtube.com/watch?v=...",
