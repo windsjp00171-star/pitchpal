@@ -777,9 +777,29 @@ def _rest(duration: float, sr: int) -> np.ndarray:
     return np.zeros(int(sr * duration), dtype=np.float32)
 
 
+def _click_track(total_samples: int, bpm: int, sr: int,
+                 beats_per_bar: int = 4) -> np.ndarray:
+    beat_samples = int(sr * 60.0 / bpm)
+    click = np.zeros(total_samples, dtype=np.float32)
+    pos = 0
+    beat_idx = 0
+    while pos < total_samples:
+        # 強拍用 1000Hz，弱拍用 800Hz
+        freq = 1000.0 if (beat_idx % beats_per_bar == 0) else 800.0
+        dur = int(0.02 * sr)  # 20ms click
+        t = np.linspace(0, 0.02, dur, endpoint=False)
+        burst = np.sin(2 * np.pi * freq * t) * np.exp(-80 * t)
+        end = min(pos + dur, total_samples)
+        click[pos:end] += burst[:end - pos]
+        pos += beat_samples
+        beat_idx += 1
+    return click * 0.35
+
+
 def parse_and_synth(text: str, key: str, bpm: int, octave: int,
                     timbre: str = "鋼琴", chord_text: str = "",
-                    beats_per_bar: int = 4) -> str:
+                    beats_per_bar: int = 4,
+                    metronome: bool = False) -> str:
     sr = 44100
     beat = 60.0 / bpm
     root_midi = MELODY_KEY_ROOTS.get(key, 60) + (octave - 4) * 12
@@ -856,6 +876,9 @@ def parse_and_synth(text: str, key: str, bpm: int, octave: int,
 
     cutoff = TIMBRE_CUTOFF.get(timbre, 8000.0)
     audio = _lowpass(audio.astype(np.float32), sr, cutoff=cutoff)
+    if metronome and len(audio) > 0:
+        click = _click_track(len(audio), bpm, sr, beats_per_bar)
+        audio = audio + click
     peak = np.max(np.abs(audio))
     if peak > 0:
         audio = audio / peak * 0.9
@@ -915,7 +938,7 @@ def _submit_feedback(file, detected, conf_str, corrected, notes):
     return submit_feedback(filename, detected, corrected, conf, notes)
 
 
-def _gen_melody(text, key, bpm, octave, timbre, chord_text, time_sig):
+def _gen_melody(text, key, bpm, octave, timbre, chord_text, time_sig, metronome):
     has_melody = bool(text and text.strip())
     has_chords = bool(chord_text and chord_text.strip())
     if not has_melody and not has_chords:
@@ -923,7 +946,7 @@ def _gen_melody(text, key, bpm, octave, timbre, chord_text, time_sig):
     beats_per_bar = 3 if time_sig == "3/4" else 4
     try:
         path = parse_and_synth(text or "", key, int(bpm), int(octave), timbre,
-                               chord_text or "", beats_per_bar)
+                               chord_text or "", beats_per_bar, bool(metronome))
         if has_melody and has_chords:
             suffix = "旋律 + 和弦"
         elif has_chords:
@@ -1536,6 +1559,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                 time_sig_radio = gr.Radio(
                     label="拍號", choices=["4/4", "3/4"], value="4/4", scale=1,
                 )
+                metronome_toggle = gr.Checkbox(label="節拍器", value=False, scale=1)
             melody_btn = gr.Button("🎵 生成試聽", variant="primary", size="lg")
             melody_status = gr.Textbox(label="狀態", interactive=False)
             melody_output = gr.Audio(label="試聽音頻", type="filepath")
@@ -1544,7 +1568,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
             melody_btn.click(
                 fn=_gen_melody,
                 inputs=[melody_input, melody_key, melody_bpm, melody_octave,
-                        melody_timbre, chord_input, time_sig_radio],
+                        melody_timbre, chord_input, time_sig_radio, metronome_toggle],
                 outputs=[melody_output, melody_status],
                 api_name="gen_melody",
                 show_progress="minimal",
