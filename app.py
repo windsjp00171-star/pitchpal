@@ -97,6 +97,8 @@ CSS = """
 .section-header { font-size: 0.75em; font-weight: 700; letter-spacing: 0.08em;
     text-transform: uppercase; color: #6b7280; margin-bottom: 4px !important; }
 .result-row { background: #f9fafb; border-radius: 8px; padding: 12px; }
+.chord-palette button { min-width: 58px !important; font-size: 0.82em !important;
+    padding: 6px 4px !important; }
 footer { display: none !important; }
 """
 
@@ -697,6 +699,54 @@ def _gen_melody(text, key, bpm, octave, timbre, chord_text, time_sig):
         return None, f"生成失敗：{e}"
 
 
+# ── 和弦調色盤 ────────────────────────────────────────────────────────────────
+
+# (interval from root in semitones, chord quality suffix) for major scale degrees I–VII
+DIATONIC_DEGREES = [(0, ""), (2, "m"), (4, "m"), (5, ""), (7, ""), (9, "m"), (11, "dim")]
+
+
+def get_diatonic_chords(key: str) -> list[str]:
+    root_semi = NOTE_MAP.get(key, 0)
+    result = []
+    for interval, quality in DIATONIC_DEGREES:
+        semi = (root_semi + interval) % 12
+        name = MAJOR_KEYS[semi]
+        display = KEY_DISPLAY.get(name, name).split("/")[0]
+        result.append(f"{display}{quality}")
+    return result
+
+
+def play_chord_audio(chord_name: str) -> str | None:
+    notes = _parse_chord_token(chord_name)
+    if not notes:
+        return None
+    rng = np.random.default_rng()
+    sr = 44100
+    audio = _synth_chord_block(notes, 1.5, sr, rng)
+    audio = _lowpass(audio, sr)
+    peak = np.max(np.abs(audio))
+    if peak > 0:
+        audio = audio / peak * 0.85
+    fd, path = tempfile.mkstemp(suffix=".wav")
+    os.close(fd)
+    sf.write(path, audio, sr)
+    return path
+
+
+def on_chord_palette_btn(chord_name: str, chord_text: str, mode: str):
+    audio = play_chord_audio(chord_name)
+    if mode == "加入輸入框":
+        sep = " " if chord_text.strip() else ""
+        new_text = chord_text.rstrip() + sep + chord_name
+    else:
+        new_text = chord_text
+    return audio, new_text
+
+
+def add_barline_to_input(chord_text: str) -> str:
+    return chord_text.rstrip() + " |"
+
+
 def download_youtube(url: str, cookies_file: str | None = None):
     if not url or not url.strip():
         return None, "", "—", "—", "", "", "請輸入 YouTube 連結。"
@@ -971,7 +1021,29 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                         placeholder="5 6 7 5 3 - - - | 7 5 6 - | 4# 5 6 4# 2 - | 6 4# 5 -",
                         lines=3,
                     )
-                    gr.Markdown("**和弦**", elem_classes="section-header")
+                    gr.Markdown("**和弦調色盤**", elem_classes="section-header")
+                    with gr.Row():
+                        chord_mode = gr.Radio(
+                            choices=["只試音", "加入輸入框"],
+                            value="只試音",
+                            show_label=False,
+                            scale=2,
+                        )
+                        barline_btn = gr.Button("| 加小節線", size="sm", scale=1)
+                    _init_chords = get_diatonic_chords("G")
+                    with gr.Row(elem_classes="chord-palette"):
+                        chord_btn_1 = gr.Button(_init_chords[0], size="sm")
+                        chord_btn_2 = gr.Button(_init_chords[1], size="sm")
+                        chord_btn_3 = gr.Button(_init_chords[2], size="sm")
+                        chord_btn_4 = gr.Button(_init_chords[3], size="sm")
+                        chord_btn_5 = gr.Button(_init_chords[4], size="sm")
+                        chord_btn_6 = gr.Button(_init_chords[5], size="sm")
+                        chord_btn_7 = gr.Button(_init_chords[6], size="sm")
+                    chord_preview = gr.Audio(
+                        label="和弦試聽", type="filepath",
+                        show_download_button=False, scale=1,
+                    )
+                    gr.Markdown("**和弦進行**", elem_classes="section-header")
                     chord_input = gr.Textbox(
                         label="和弦進行（選填）— 用 | 分小節，同小節和弦自動平均分拍",
                         placeholder="C Em7 | D | G/B | Em7 D",
@@ -1009,6 +1081,34 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                         melody_timbre, chord_input, time_sig_radio],
                 outputs=[melody_output, melody_status],
                 api_name="gen_melody",
+            )
+
+            # Chord palette: update button labels when key changes
+            def _update_chord_btns(key):
+                chords = get_diatonic_chords(key)
+                return [gr.Button(value=c) for c in chords]
+
+            melody_key.change(
+                fn=_update_chord_btns,
+                inputs=[melody_key],
+                outputs=[chord_btn_1, chord_btn_2, chord_btn_3,
+                         chord_btn_4, chord_btn_5, chord_btn_6, chord_btn_7],
+            )
+
+            # Wire each chord button
+            _chord_btns = [chord_btn_1, chord_btn_2, chord_btn_3,
+                           chord_btn_4, chord_btn_5, chord_btn_6, chord_btn_7]
+            for _btn in _chord_btns:
+                _btn.click(
+                    fn=on_chord_palette_btn,
+                    inputs=[_btn, chord_input, chord_mode],
+                    outputs=[chord_preview, chord_input],
+                )
+
+            barline_btn.click(
+                fn=add_barline_to_input,
+                inputs=[chord_input],
+                outputs=[chord_input],
             )
 
 if __name__ == "__main__":
