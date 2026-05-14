@@ -23,6 +23,8 @@ import traceback
 import os
 import shutil
 import threading
+import base64
+import io
 import time
 import atexit
 from scipy.signal import butter, sosfilt, lfilter
@@ -809,11 +811,19 @@ def _gen_melody(text, key, bpm, octave, timbre, chord_text, time_sig):
 # ── 和弦調色盤 ────────────────────────────────────────────────────────────────
 
 def _audio_html(path: str | None) -> str:
-    """Return an invisible autoplay <audio> element. Unique ID forces browser replay."""
+    """Return an invisible autoplay <audio> with base64-encoded WAV (no file-serving dependency)."""
     if not path:
         return ""
+    buf = io.BytesIO()
+    data, sr = sf.read(path, dtype="float32")
+    sf.write(buf, data, sr, format="WAV")
+    b64 = base64.b64encode(buf.getvalue()).decode()
     uid = os.urandom(4).hex()
-    return f'<audio id="pp{uid}" src="/file={path}" autoplay style="display:none"></audio>'
+    return (
+        f'<audio id="pp{uid}" autoplay style="display:none">'
+        f'<source src="data:audio/wav;base64,{b64}" type="audio/wav">'
+        f'</audio>'
+    )
 
 
 # (interval from root in semitones, chord quality suffix) for major scale degrees I–VII
