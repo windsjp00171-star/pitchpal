@@ -984,13 +984,13 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
 
         # ── Tab 1：移調工具 ──────────────────────────────────────────────────
         with gr.Tab("🎚️ 移調工具"):
+
+            # ── 上排：音源 | 分析結果（並排） ───────────────────────────────
             with gr.Row(equal_height=False):
 
-                # ── 左欄：輸入 ──────────────────────────────────────────────
+                # 左：音源
                 with gr.Column(scale=5):
-
-                    # 區塊 1：音源
-                    gr.Markdown("**音源**", elem_classes="section-header")
+                    gr.Markdown("**📂 音源**", elem_classes="section-header")
                     with gr.Tabs():
                         with gr.Tab("上傳檔案"):
                             audio_input = gr.Audio(
@@ -1008,7 +1008,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                                     show_label=False,
                                     scale=4,
                                 )
-                                yt_btn = gr.Button("下載並分析", scale=1)
+                                yt_btn = gr.Button("▶ 分析", variant="primary", scale=1)
                             yt_status_box = gr.Textbox(
                                 show_label=False, interactive=False,
                                 placeholder="下載狀態…",
@@ -1027,8 +1027,9 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                                 "<small>⚠️ 請確認你對該內容擁有合法授權（購買、CCLI 或版權方許可）。本工具僅供移調分析，授權責任由使用者自行承擔。</small>"
                             )
 
-                    # 區塊 2：分析結果
-                    gr.Markdown("**分析結果**", elem_classes="section-header")
+                # 右：分析結果
+                with gr.Column(scale=5):
+                    gr.Markdown("**🔍 分析結果**", elem_classes="section-header")
                     filename_box = gr.Textbox(
                         label="檔案 / 影片名稱",
                         interactive=False,
@@ -1047,9 +1048,29 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                             value="—",
                             scale=1,
                         )
+                    gr.Markdown("<br>")
+                    with gr.Accordion("偵測結果不正確？回報給我們 🙏", open=False):
+                        gr.Markdown(
+                            "調性辨識對清晰樂器準確率較高。人聲為主、有混響或多次轉調的曲目偵測準確率會下降。"
+                            "\n\n選擇正確調性後按「回報修正」即可，不需要登入，感謝幫助改善工具。"
+                        )
+                        feedback_key = gr.Dropdown(
+                            label="正確調性", choices=ALL_KEYS, value=None,
+                        )
+                        feedback_notes = gr.Textbox(
+                            label="備註（選填）",
+                            placeholder="例如：這首歌有轉調…",
+                            lines=1,
+                        )
+                        feedback_btn = gr.Button("回報修正", variant="secondary")
+                        feedback_status = gr.Textbox(label="回報狀態", interactive=False)
 
-                    # 區塊 3：移調設定
-                    gr.Markdown("**移調設定**", elem_classes="section-header")
+            # ── 下排：移調設定 | 音檔生成（並排） ──────────────────────────
+            with gr.Row(equal_height=False):
+
+                # 左：移調設定
+                with gr.Column(scale=5):
+                    gr.Markdown("**🎚️ 移調設定**", elem_classes="section-header")
                     with gr.Row():
                         steps_slider = gr.Number(
                             label="半音數（+ 升調 / − 降調）",
@@ -1068,41 +1089,22 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                         lines=3,
                         elem_id="capo-box",
                     )
-                    with gr.Row():
-                        output_fmt_radio = gr.Radio(
-                            label="輸出格式",
-                            choices=OUTPUT_FORMATS,
-                            value="WAV",
-                            scale=1,
-                        )
-                        transpose_btn = gr.Button(
-                            "開始移調", variant="primary", size="lg", scale=2,
-                        )
 
-                # ── 右欄：輸出 ──────────────────────────────────────────────
+                # 右：音檔生成
                 with gr.Column(scale=5):
-                    gr.Markdown("**移調結果**", elem_classes="section-header")
+                    gr.Markdown("**💾 音檔生成**", elem_classes="section-header")
+                    output_fmt_radio = gr.Radio(
+                        label="輸出格式",
+                        choices=OUTPUT_FORMATS,
+                        value="WAV",
+                    )
+                    transpose_btn = gr.Button(
+                        "開始移調", variant="primary", size="lg",
+                    )
                     status_box = gr.Textbox(
                         label="狀態", interactive=False, placeholder="移調完成後顯示…"
                     )
                     audio_output = gr.Audio(label="移調後音頻", type="filepath")
-
-                    gr.Markdown("<br>")
-                    with gr.Accordion("偵測結果不正確？回報給我們 🙏", open=False):
-                        gr.Markdown(
-                            "調性辨識對清晰樂器準確率較高。人聲為主、有混響或多次轉調的曲目偵測準確率會下降。"
-                            "\n\n選擇正確調性後按「回報修正」即可，不需要登入，感謝幫助改善工具。"
-                        )
-                        feedback_key = gr.Dropdown(
-                            label="正確調性", choices=ALL_KEYS, value=None,
-                        )
-                        feedback_notes = gr.Textbox(
-                            label="備註（選填）",
-                            placeholder="例如：這首歌有轉調…",
-                            lines=1,
-                        )
-                        feedback_btn = gr.Button("回報修正", variant="secondary")
-                        feedback_status = gr.Textbox(label="回報狀態", interactive=False)
 
             # ── 事件綁定 ────────────────────────────────────────────────────
             yt_btn.click(
