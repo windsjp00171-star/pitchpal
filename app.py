@@ -1296,8 +1296,7 @@ def _make_note_handler(digit: str):
 
 
 def append_melody_modifier(melody_text: str, char: str) -> str:
-    if char == "-":
-        # Don't attach to empty input or whitespace-only
+    if char in ("-", "_", "__", "."):
         if not melody_text.strip():
             return melody_text
         return melody_text.rstrip() + char
