@@ -1531,9 +1531,9 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                 with gr.Column(scale=5):
                     gr.Markdown("**🎚️ 調 KEY 設定**", elem_classes="section-header")
                     with gr.Row():
-                        steps_slider = gr.Number(
+                        steps_slider = gr.Slider(
                             label="半音數（+ 升調 / − 降調）",
-                            minimum=-12, maximum=12, step=1, value=0, precision=0,
+                            minimum=-12, maximum=12, step=1, value=0,
                             scale=2,
                         )
                         result_key_box = gr.Textbox(
