@@ -1602,7 +1602,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                 inputs=[audio_input, detected_key_box, steps_slider, output_fmt_radio, key_override],
                 outputs=[audio_output, status_box],
                 api_name="transpose_audio",
-                show_progress="full",
+                show_progress="minimal",
             )
             feedback_btn.click(
                 fn=_submit_feedback,
