@@ -486,7 +486,7 @@ def transpose_audio(file, detected_key, steps, output_fmt, key_override="（使�
             y_shifted = y
         else:
             _ps = lambda ch: librosa.effects.pitch_shift(
-                ch, sr=sr, n_steps=steps, n_fft=8192, bins_per_octave=12)
+                ch, sr=sr, n_steps=steps, bins_per_octave=12)
             if y.ndim == 1:
                 y_shifted = _ps(y)
             else:
