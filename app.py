@@ -1530,18 +1530,15 @@ with gr.Blocks(title="PitchPal") as demo:
                 # 左：移調設定
                 with gr.Column(scale=5):
                     gr.Markdown("**🎚️ 調 KEY 設定**", elem_classes="section-header")
-                    with gr.Row():
-                        steps_slider = gr.Slider(
-                            label="半音數（+ 升調 / − 降調）",
-                            minimum=-12, maximum=12, step=1, value=0,
-                            scale=2,
-                        )
-                        result_key_box = gr.Textbox(
-                            label="移調後調性",
-                            interactive=False,
-                            placeholder="—",
-                            scale=3,
-                        )
+                    steps_slider = gr.Slider(
+                        label="移調半音數　　− 降調  ←  0  →  + 升調",
+                        minimum=-12, maximum=12, step=1, value=0,
+                    )
+                    result_key_box = gr.Textbox(
+                        label="移調後調性",
+                        interactive=False,
+                        placeholder="—",
+                    )
                     capo_box = gr.Textbox(
                         label="🎸 Capo 建議（吉他）",
                         interactive=False,
