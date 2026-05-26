@@ -1109,9 +1109,15 @@ def _audio_html(path: str | None) -> str:
         b64 = base64.b64encode(f.read()).decode()
     uid = os.urandom(4).hex()
     return (
-        f'<audio id="pp{uid}" autoplay style="display:none">'
+        f'<audio id="pp{uid}" style="display:none">'
         f'<source src="data:audio/wav;base64,{b64}" type="audio/wav">'
         f'</audio>'
+        f'<script>'
+        f'(function(){{'
+        f'  var a=document.getElementById("pp{uid}");'
+        f'  if(a)a.play().catch(function(){{}});'
+        f'}})();'
+        f'</script>'
     )
 
 
