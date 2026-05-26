@@ -1430,7 +1430,7 @@ def download_youtube(url: str, cookies_file: str | None = None):
 
 
 
-with gr.Blocks(title="PitchPal") as demo:
+with gr.Blocks(title="PitchPal", css=CSS) as demo:
     gr.Markdown("""
 <div style="background:linear-gradient(135deg,#1a1a2e,#16213e,#0f3460);border-radius:12px;padding:22px 28px;margin-bottom:4px">
 <h1 style="color:#f0c040;margin:0;font-size:1.8em;letter-spacing:0.04em">🎵 PitchPal</h1>
@@ -1883,5 +1883,5 @@ with gr.Blocks(title="PitchPal") as demo:
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 7860))
-    demo.launch(server_name="0.0.0.0", server_port=port, css=CSS)
+    demo.launch(server_name="0.0.0.0", server_port=port)
 
