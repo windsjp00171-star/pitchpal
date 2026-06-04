@@ -39,6 +39,10 @@ def detect_key(audio_path: str) -> str:
     minor_profile = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53,
                                2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
 
+    # Guard: silence or noise can produce NaN correlations; fall back to C 大調
+    if np.allclose(chroma_mean, 0):
+        return "C 大調"
+
     major_scores = [
         np.corrcoef(np.roll(major_profile, i), chroma_mean)[0, 1]
         for i in range(12)
@@ -47,6 +51,10 @@ def detect_key(audio_path: str) -> str:
         np.corrcoef(np.roll(minor_profile, i), chroma_mean)[0, 1]
         for i in range(12)
     ]
+
+    # Replace NaN (e.g. constant chroma) with -inf so argmax still works safely
+    major_scores = [s if np.isfinite(s) else -np.inf for s in major_scores]
+    minor_scores = [s if np.isfinite(s) else -np.inf for s in minor_scores]
 
     best_major = int(np.argmax(major_scores))
     best_minor = int(np.argmax(minor_scores))
@@ -66,6 +74,8 @@ def key_to_semitone(key_str: str) -> int:
     name_map = {"C": 0, "C#": 1, "Db": 1, "D": 2, "D#": 3, "Eb": 3,
                 "E": 4, "F": 5, "F#": 6, "Gb": 6, "G": 7, "G#": 8,
                 "Ab": 8, "A": 9, "A#": 10, "Bb": 10, "B": 11}
+    if note not in name_map:
+        raise ValueError(f"未知音名：{note!r}（輸入：{key_str!r}）")
     return name_map[note]
 
 
@@ -87,7 +97,11 @@ def _convert_with_pydub(wav_path: str, fmt: str) -> str:
     os.close(fd)
     # MP4 audio uses codec aac inside mp4 container
     codec = "aac" if fmt == "MP4" else None
-    audio.export(out_path, format=ext, codec=codec)
+    try:
+        audio.export(out_path, format=ext, codec=codec)
+    except Exception as e:
+        os.remove(wav_path)
+        raise RuntimeError(f"格式轉換失敗（{fmt}）：{e}") from e
     os.remove(wav_path)
     return out_path
 
@@ -131,7 +145,10 @@ def transpose_audio(audio_path: str, detected_key: str, target_key: str, output_
     if output_fmt == "WAV":
         out_path = wav_path
     else:
-        out_path = _convert_with_pydub(wav_path, output_fmt)
+        try:
+            out_path = _convert_with_pydub(wav_path, output_fmt)
+        except RuntimeError as e:
+            return None, str(e)
 
     direction = (f"+{steps}" if steps > 0 else str(steps)) if steps != 0 else "0"
     msg = (
