@@ -6,6 +6,7 @@ import numpy as np
 import tempfile
 import os
 import shutil
+import subprocess
 
 MAJOR_KEYS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 MINOR_KEYS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
@@ -166,51 +167,182 @@ def process_upload(audio_path: str):
     return key, gr.update(choices=ALL_KEYS, value=key)
 
 
+LILYPOND_AVAILABLE = shutil.which("lilypond") is not None
+
+
+def _hz_to_midi(freq: float) -> int:
+    return int(round(69 + 12 * np.log2(freq / 440.0)))
+
+
+def transcribe_to_pdf(audio_path: str, title: str, composer: str) -> tuple:
+    """音檔 → librosa pYIN 旋律追蹤 → music21 → LilyPond → PDF"""
+    if not audio_path:
+        return None, "請先上傳音頻檔案。"
+    if not LILYPOND_AVAILABLE:
+        return None, "未偵測到 lilypond，請先安裝：sudo apt install lilypond"
+
+    try:
+        from music21 import stream, note, metadata as m21meta, tempo, meter
+    except ImportError:
+        return None, "請先安裝 music21：pip install music21"
+
+    # 1. 載入音頻，pYIN 追蹤基本頻率
+    y, sr = librosa.load(audio_path, mono=True)
+    hop_length = 512
+    f0, voiced_flag, _ = librosa.pyin(
+        y, sr=sr,
+        fmin=librosa.note_to_hz("C2"),
+        fmax=librosa.note_to_hz("C7"),
+        hop_length=hop_length,
+    )
+
+    # 2. 將 frame-level f0 合併成音符（相鄰同音合併）
+    frame_duration = hop_length / sr  # 秒/frame
+    notes_raw = []  # [(midi_pitch, duration_in_frames)]
+    prev_midi = None
+    run = 0
+    for freq, voiced in zip(f0, voiced_flag):
+        if voiced and freq > 0:
+            midi = _hz_to_midi(float(freq))
+        else:
+            midi = None  # 休止
+
+        if midi == prev_midi:
+            run += 1
+        else:
+            if prev_midi is not None or run > 0:
+                notes_raw.append((prev_midi, run))
+            prev_midi = midi
+            run = 1
+    if run > 0:
+        notes_raw.append((prev_midi, run))
+
+    # 3. 量化為最小音符單位（以 16 分音符為基準）
+    # 預設 BPM=80，計算每 frame 的音符時值
+    bpm = 80
+    quarter_sec = 60.0 / bpm
+    sixteenth_sec = quarter_sec / 4
+    frames_per_16th = max(1, int(round(sixteenth_sec / frame_duration)))
+
+    part = stream.Part()
+    part.insert(0, tempo.MetronomeMark(number=bpm))
+    part.insert(0, meter.TimeSignature("4/4"))
+
+    for midi_pitch, frames in notes_raw:
+        sixteenths = max(1, int(round(frames / frames_per_16th)))
+        # music21 quarterLength: 1.0 = 四分音符, 0.25 = 十六分音符
+        ql = sixteenths * 0.25
+        if midi_pitch is None:
+            n = note.Rest(quarterLength=ql)
+        else:
+            n = note.Note(midi_pitch, quarterLength=ql)
+        part.append(n)
+
+    score = stream.Score()
+    md = m21meta.Metadata()
+    if title.strip():
+        md.title = title.strip()
+    if composer.strip():
+        md.composer = composer.strip()
+    score.insert(0, md)
+    score.append(part)
+
+    # 4. music21 → LilyPond → PDF
+    try:
+        ly_path = score.write("lilypond")
+        pdf_base = str(ly_path).replace(".ly", "")
+
+        result = subprocess.run(
+            ["lilypond", "--pdf", f"-o{pdf_base}", str(ly_path)],
+            capture_output=True, text=True, timeout=120,
+        )
+        pdf_path = pdf_base + ".pdf"
+        if result.returncode != 0 or not os.path.exists(pdf_path):
+            return None, f"LilyPond 渲染失敗：{result.stderr[-500:]}"
+    except subprocess.TimeoutExpired:
+        return None, "LilyPond 渲染逾時（超過 120 秒）。"
+    except Exception as e:
+        return None, f"PDF 輸出失敗：{e}"
+    finally:
+        if "ly_path" in dir() and os.path.exists(str(ly_path)):
+            os.remove(str(ly_path))
+
+    return pdf_path, "轉譜完成，PDF 已產生。"
+
+
 ffmpeg_note = "" if FFMPEG_AVAILABLE else "\n> ⚠️ 未偵測到 ffmpeg，MP3 / MP4 輸出暫不可用（請安裝 ffmpeg）。"
+lilypond_note = "" if LILYPOND_AVAILABLE else "\n> ⚠️ 未偵測到 lilypond，轉譜功能暫不可用（請安裝 lilypond）。"
 
 with gr.Blocks(title="音樂 Key 辨別與移調工具") as demo:
     gr.Markdown("# 🎵 音樂 Key 辨別與移調工具")
-    gr.Markdown(f"上傳音頻，自動偵測調性，選擇目標 Key 後下載移調結果。{ffmpeg_note}")
 
-    with gr.Row():
-        with gr.Column():
-            audio_input = gr.Audio(
-                label="上傳音頻（mp3 / wav / m4a）",
-                type="filepath",
-                sources=["upload"],
-            )
-            detected_key_box = gr.Textbox(
-                label="偵測到的原曲調性",
-                interactive=False,
-                placeholder="上傳後自動顯示…",
-            )
-            target_key_drop = gr.Dropdown(
-                label="目標 Key",
-                choices=ALL_KEYS,
-                value=None,
-            )
-            output_fmt_radio = gr.Radio(
-                label="輸出格式",
-                choices=OUTPUT_FORMATS,
-                value="WAV",
-            )
-            transpose_btn = gr.Button("開始移調", variant="primary")
+    with gr.Tabs():
+        with gr.Tab("調性偵測 / 移調"):
+            gr.Markdown(f"上傳音頻，自動偵測調性，選擇目標 Key 後下載移調結果。{ffmpeg_note}")
 
-        with gr.Column():
-            status_box = gr.Textbox(label="狀態訊息", interactive=False)
-            audio_output = gr.Audio(label="移調後音頻（點擊下載）", type="filepath")
+            with gr.Row():
+                with gr.Column():
+                    audio_input = gr.Audio(
+                        label="上傳音頻（mp3 / wav / m4a）",
+                        type="filepath",
+                        sources=["upload"],
+                    )
+                    detected_key_box = gr.Textbox(
+                        label="偵測到的原曲調性",
+                        interactive=False,
+                        placeholder="上傳後自動顯示…",
+                    )
+                    target_key_drop = gr.Dropdown(
+                        label="目標 Key",
+                        choices=ALL_KEYS,
+                        value=None,
+                    )
+                    output_fmt_radio = gr.Radio(
+                        label="輸出格式",
+                        choices=OUTPUT_FORMATS,
+                        value="WAV",
+                    )
+                    transpose_btn = gr.Button("開始移調", variant="primary")
 
-    audio_input.change(
-        fn=process_upload,
-        inputs=[audio_input],
-        outputs=[detected_key_box, target_key_drop],
-    )
+                with gr.Column():
+                    status_box = gr.Textbox(label="狀態訊息", interactive=False)
+                    audio_output = gr.Audio(label="移調後音頻（點擊下載）", type="filepath")
 
-    transpose_btn.click(
-        fn=transpose_audio,
-        inputs=[audio_input, detected_key_box, target_key_drop, output_fmt_radio],
-        outputs=[audio_output, status_box],
-    )
+            audio_input.change(
+                fn=process_upload,
+                inputs=[audio_input],
+                outputs=[detected_key_box, target_key_drop],
+            )
+            transpose_btn.click(
+                fn=transpose_audio,
+                inputs=[audio_input, detected_key_box, target_key_drop, output_fmt_radio],
+                outputs=[audio_output, status_box],
+            )
+
+        with gr.Tab("音檔轉譜（PDF）"):
+            gr.Markdown(f"上傳音頻，自動辨識音符，輸出 PDF 樂譜。{lilypond_note}")
+            gr.Markdown("> 適合旋律為主的詩歌錄音，複雜混音準確率較低。")
+
+            with gr.Row():
+                with gr.Column():
+                    transcribe_audio = gr.Audio(
+                        label="上傳音頻（mp3 / wav / m4a）",
+                        type="filepath",
+                        sources=["upload"],
+                    )
+                    score_title = gr.Textbox(label="樂譜標題（選填）", placeholder="例：Amazing Grace")
+                    score_composer = gr.Textbox(label="作曲者（選填）", placeholder="例：John Newton")
+                    transcribe_btn = gr.Button("開始轉譜", variant="primary")
+
+                with gr.Column():
+                    transcribe_status = gr.Textbox(label="狀態訊息", interactive=False)
+                    pdf_output = gr.File(label="PDF 樂譜（點擊下載）")
+
+            transcribe_btn.click(
+                fn=transcribe_to_pdf,
+                inputs=[transcribe_audio, score_title, score_composer],
+                outputs=[pdf_output, transcribe_status],
+            )
 
 if __name__ == "__main__":
     demo.launch(inbrowser=True)
