@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from core import detect_key, transpose_audio, ALL_KEYS
+from transcribe import transcribe_to_pdf
 
 app = FastAPI(title="PitchPal API")
 
@@ -63,6 +64,24 @@ async def transpose(
         filename="transposed.wav",
         background=None,
     )
+
+
+@app.post("/api/transcribe")
+async def transcribe(
+    file: UploadFile = File(...),
+    title: str = Form(""),
+    composer: str = Form(""),
+):
+    path = _save_upload(file)
+    try:
+        pdf_path, msg = transcribe_to_pdf(path, title, composer)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        os.remove(path)
+    if pdf_path is None:
+        raise HTTPException(status_code=422, detail=msg)
+    return FileResponse(pdf_path, media_type="application/pdf", filename="score.pdf")
 
 
 # 前端靜態檔（build 後）— 支援本機與 Docker 兩種路徑
