@@ -1,5 +1,10 @@
 __pycache__/
 *.py[cod]
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+build/
 frontend/node_modules/
 frontend/dist/
 *.wav
