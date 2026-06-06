@@ -65,7 +65,13 @@ async def transpose(
     )
 
 
-# 前端靜態檔（build 後）
-frontend_dist = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
-if os.path.exists(frontend_dist):
-    app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="static")
+# 前端靜態檔（build 後）— 支援本機與 Docker 兩種路徑
+_here = os.path.dirname(__file__)
+for _candidate in [
+    os.path.join(_here, "..", "frontend", "dist"),   # 本機開發
+    os.path.join(_here, "..", "frontend", "dist"),   # Docker WORKDIR /app
+    "/app/frontend/dist",                             # Docker 絕對路徑
+]:
+    if os.path.exists(_candidate):
+        app.mount("/", StaticFiles(directory=_candidate, html=True), name="static")
+        break
