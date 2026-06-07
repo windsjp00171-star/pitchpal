@@ -14,8 +14,6 @@ type Tab = 'detect' | 'jianpu' | 'transcribe'
 
 // ─── 辨識 Key / 移調 ──────────────────────────────────────────────────────────
 
-// 把 Key 字串轉成 ALL_KEYS 的 index，方便 +/-1
-function keyIndex(k: string) { return ALL_KEYS.indexOf(k) }
 function shiftKey(k: string, delta: number) {
   const majorKeys = ALL_KEYS.slice(0, 12)
   const minorKeys = ALL_KEYS.slice(12)
