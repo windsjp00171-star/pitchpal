@@ -1,0 +1,24 @@
+name: Deploy to Hugging Face Spaces
+
+on:
+  push:
+    branches:
+      - claude/music-key-transposer-G7apB
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Push to HF Spaces
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          git config user.email "action@github.com"
+          git config user.name "GitHub Action"
+          git remote add hf https://winds00171:${HF_TOKEN}@huggingface.co/spaces/winds00171/pitchpal
+          git push hf HEAD:main --force
