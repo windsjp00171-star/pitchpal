@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 
 const ALL_KEYS = [
   'C 大調','C#/Db 大調','D 大調','D#/Eb 大調','E 大調','F 大調',
@@ -9,7 +9,209 @@ const ALL_KEYS = [
 
 type DetectStep = 'idle' | 'detecting' | 'detected' | 'transposing' | 'done'
 type TranscribeStep = 'idle' | 'processing' | 'done'
-type Tab = 'detect' | 'transcribe'
+type Tab = 'detect' | 'jianpu' | 'transcribe'
+
+const MELODY_KEYS = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']
+const TIMBRES = ['鋼琴', '吉他', '管風琴']
+
+const JIANPU_HELP = `旋律：1–7 代表 Do–Ti，0 休止符
+升半音 4#，高八度 1'，低八度 1,
+八分音符 1_，十六分 1__，延音 1--
+| 小節線（可省略）
+
+和弦：用 | 分小節
+C | G | Am | F
+C G | Am F（同一小節自動平均分拍）
+支援：C Cm C7 Cm7 Cmaj7 Csus4 Cdim G/B`
+
+function JianpuTab() {
+  const [melody, setMelody] = useState('')
+  const [chords, setChords] = useState('')
+  const [key, setKey] = useState('G')
+  const [bpm, setBpm] = useState(80)
+  const [octave, setOctave] = useState(4)
+  const [timbre, setTimbre] = useState('鋼琴')
+  const [metronome, setMetronome] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [audioUrl, setAudioUrl] = useState('')
+  const [error, setError] = useState('')
+  const [diatonicChords, setDiatonicChords] = useState<string[]>([])
+  const [showHelp, setShowHelp] = useState(false)
+
+  useEffect(() => {
+    fetch(`/api/jianpu/chords/${key}`)
+      .then(r => r.json())
+      .then(d => setDiatonicChords(d.chords))
+      .catch(() => {})
+  }, [key])
+
+  const appendMelody = (s: string) => setMelody(m => m ? m + ' ' + s : s)
+  const appendChord = (s: string) => setChords(c => c ? c + ' ' + s : s)
+
+  const handleSynth = async () => {
+    if (!melody.trim() && !chords.trim()) {
+      setError('請輸入旋律或和弦。'); return
+    }
+    setLoading(true); setError(''); setAudioUrl('')
+    const fd = new FormData()
+    fd.append('melody', melody)
+    fd.append('chords', chords)
+    fd.append('key', key)
+    fd.append('bpm', String(bpm))
+    fd.append('octave', String(octave))
+    fd.append('timbre', timbre)
+    fd.append('metronome', String(metronome))
+    try {
+      const res = await fetch('/api/jianpu/synth', { method: 'POST', body: fd })
+      if (!res.ok) throw new Error((await res.json()).detail)
+      const blob = await res.blob()
+      setAudioUrl(URL.createObjectURL(blob))
+    } catch (e: any) {
+      setError(e.message || '合成失敗')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl bg-indigo-50 border border-indigo-200 px-4 py-3 text-sm text-indigo-800">
+        輸入數字簡譜 + 和弦進行，合成音頻試聽。旋律與和弦皆為選填，可單獨使用。
+        <button onClick={() => setShowHelp(h => !h)} className="ml-2 underline text-xs">
+          {showHelp ? '收起說明' : '格式說明'}
+        </button>
+      </div>
+
+      {showHelp && (
+        <pre className="rounded-xl bg-gray-50 border border-gray-200 px-4 py-3 text-xs text-gray-600 whitespace-pre-wrap">{JIANPU_HELP}</pre>
+      )}
+
+      {/* 參數列 */}
+      <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">設定</p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">調性</label>
+            <select value={key} onChange={e => setKey(e.target.value)}
+              className="w-full rounded-lg border border-gray-200 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
+              {MELODY_KEYS.map(k => <option key={k}>{k}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">音色</label>
+            <select value={timbre} onChange={e => setTimbre(e.target.value)}
+              className="w-full rounded-lg border border-gray-200 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
+              {TIMBRES.map(t => <option key={t}>{t}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">BPM（{bpm}）</label>
+            <input type="range" min={40} max={200} value={bpm} onChange={e => setBpm(+e.target.value)}
+              className="w-full accent-indigo-500" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">八度（{octave}）</label>
+            <input type="range" min={3} max={5} value={octave} onChange={e => setOctave(+e.target.value)}
+              className="w-full accent-indigo-500" />
+          </div>
+        </div>
+        <label className="flex items-center gap-2 mt-3 text-sm text-gray-600 cursor-pointer">
+          <input type="checkbox" checked={metronome} onChange={e => setMetronome(e.target.checked)}
+            className="accent-indigo-500" />
+          加入節拍器
+        </label>
+      </div>
+
+      {/* 旋律輸入 */}
+      <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">🎵 旋律（數字簡譜）</p>
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {['1','2','3','4','5','6','7','0 休'].map(n => (
+            <button key={n} onClick={() => appendMelody(n.split(' ')[0])}
+              className="px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 text-sm font-medium hover:bg-indigo-100 active:scale-95 transition">
+              {n}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {[["#","#"],["b","b"],["'","↑八"],['","↓八'],["_","八分"],["__","十六"],["--","延音"],["|","|"]].map(([val, label]) => (
+            <button key={val} onClick={() => {
+              setMelody(m => {
+                const trimmed = m.trimEnd()
+                const lastSpace = trimmed.lastIndexOf(' ')
+                const lastToken = lastSpace >= 0 ? trimmed.slice(lastSpace + 1) : trimmed
+                if (lastToken && !lastToken.includes(' ')) {
+                  return trimmed.slice(0, trimmed.length - lastToken.length) + lastToken + val
+                }
+                return m + val
+              })
+            }}
+              className="px-3 py-1.5 rounded-lg bg-gray-100 text-gray-600 text-xs hover:bg-gray-200 active:scale-95 transition">
+              {label}
+            </button>
+          ))}
+        </div>
+        <textarea
+          value={melody}
+          onChange={e => setMelody(e.target.value)}
+          placeholder="5 6 7 5 3 - - - | 7 5 6 -"
+          rows={3}
+          className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400"
+        />
+        <button onClick={() => setMelody('')} className="text-xs text-gray-400 hover:text-gray-600 mt-1">清空</button>
+      </div>
+
+      {/* 和弦輸入 */}
+      <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">🎸 和弦進行</p>
+        {diatonicChords.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {diatonicChords.map(c => (
+              <button key={c} onClick={() => appendChord(c)}
+                className="px-3 py-1.5 rounded-lg bg-green-50 text-green-700 text-sm font-medium hover:bg-green-100 active:scale-95 transition">
+                {c}
+              </button>
+            ))}
+            <button onClick={() => appendChord('|')}
+              className="px-3 py-1.5 rounded-lg bg-gray-100 text-gray-500 text-sm hover:bg-gray-200 active:scale-95 transition">
+              |
+            </button>
+          </div>
+        )}
+        <textarea
+          value={chords}
+          onChange={e => setChords(e.target.value)}
+          placeholder="C Em7 | D | G/B | Em7 D"
+          rows={2}
+          className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400"
+        />
+        <button onClick={() => setChords('')} className="text-xs text-gray-400 hover:text-gray-600 mt-1">清空</button>
+      </div>
+
+      {/* 合成按鈕 */}
+      <button
+        onClick={handleSynth}
+        disabled={loading}
+        className="w-full rounded-xl bg-indigo-600 text-white py-3 text-sm font-semibold hover:bg-indigo-700 active:scale-95 transition disabled:opacity-50"
+      >
+        {loading ? '合成中…' : '▶ 合成試聽'}
+      </button>
+
+      {error && <p className="text-sm text-red-500 text-center">{error}</p>}
+
+      {audioUrl && (
+        <div className="rounded-2xl border border-green-100 bg-green-50 p-4 shadow-sm space-y-2">
+          <p className="text-xs font-semibold text-green-600 uppercase tracking-wide">試聽結果</p>
+          <audio controls src={audioUrl} className="w-full" />
+          <a href={audioUrl} download="preview.wav"
+            className="block text-center text-xs text-green-600 hover:underline">
+            ⬇ 下載音檔
+          </a>
+        </div>
+      )}
+    </div>
+  )
+}
 
 function KeyDetectTab() {
   const [file, setFile] = useState<File | null>(null)
@@ -291,23 +493,32 @@ export default function App() {
       <div className="w-full max-w-md mb-4 flex rounded-xl bg-white border border-gray-100 shadow-sm overflow-hidden">
         <button
           onClick={() => setTab('detect')}
-          className={`flex-1 py-2.5 text-sm font-medium transition-colors
+          className={`flex-1 py-2.5 text-xs font-medium transition-colors
             ${tab === 'detect' ? 'bg-purple-600 text-white' : 'text-gray-500 hover:text-gray-700'}`}
         >
           辨識 Key / 移調
         </button>
         <button
+          onClick={() => setTab('jianpu')}
+          className={`flex-1 py-2.5 text-xs font-medium transition-colors
+            ${tab === 'jianpu' ? 'bg-indigo-600 text-white' : 'text-gray-500 hover:text-gray-700'}`}
+        >
+          旋律試聽
+        </button>
+        <button
           onClick={() => setTab('transcribe')}
-          className={`flex-1 py-2.5 text-sm font-medium transition-colors
+          className={`flex-1 py-2.5 text-xs font-medium transition-colors
             ${tab === 'transcribe' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-gray-700'}`}
         >
-          音檔轉譜 PDF
+          音檔轉譜
         </button>
       </div>
 
       {/* Content */}
       <div className="w-full max-w-md">
-        {tab === 'detect' ? <KeyDetectTab /> : <TranscribeTab />}
+        {tab === 'detect' && <KeyDetectTab />}
+        {tab === 'jianpu' && <JianpuTab />}
+        {tab === 'transcribe' && <TranscribeTab />}
       </div>
     </div>
   )
