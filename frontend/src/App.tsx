@@ -19,7 +19,7 @@ function KeyDetectTab() {
   const [detecting, setDetecting] = useState(false)
   const [detectedKey, setDetectedKey] = useState('')
   const [confidence, setConfidence] = useState(0)
-  const [targetKey, setTargetKey] = useState('')
+  const [targetKey, setTargetKey] = useState(ALL_KEYS[0])
   const [transposing, setTransposing] = useState(false)
   const [downloadUrl, setDownloadUrl] = useState('')
   const [error, setError] = useState('')
@@ -27,12 +27,12 @@ function KeyDetectTab() {
 
   const reset = () => {
     setFile(null); setDetecting(false); setDetectedKey(''); setConfidence(0)
-    setTargetKey(''); setTransposing(false); setDownloadUrl(''); setError('')
+    setTargetKey(ALL_KEYS[0]); setTransposing(false); setDownloadUrl(''); setError('')
     if (inputRef.current) inputRef.current.value = ''
   }
 
   const handleFile = async (f: File) => {
-    reset(); setFile(f); setDetecting(true)
+    setFile(f); setDetecting(true); setDetectedKey(''); setConfidence(0); setDownloadUrl(''); setError('')
     const fd = new FormData(); fd.append('file', f)
     try {
       const res = await fetch('/api/detect', { method: 'POST', body: fd })
@@ -65,7 +65,7 @@ function KeyDetectTab() {
   const isBusy = detecting || transposing
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {/* YouTube 提示 */}
       <div className="flex items-start gap-2 rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-xs text-amber-800">
         <span className="text-base leading-none mt-0.5">💡</span>
@@ -73,83 +73,68 @@ function KeyDetectTab() {
       </div>
 
       {/* 上傳區 */}
-      <div
-        onClick={() => !isBusy && inputRef.current?.click()}
-        onDragOver={e => e.preventDefault()}
-        onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f && !isBusy) handleFile(f) }}
-        className={`relative border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all
-          ${isBusy ? 'border-purple-200 bg-purple-50 cursor-not-allowed'
-            : file ? 'border-purple-400 bg-purple-50'
-            : 'border-gray-200 bg-gray-50 hover:border-purple-400 hover:bg-purple-50'}`}
-      >
-        <input ref={inputRef} type="file" accept="audio/*" className="hidden"
-          onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f) }} />
-        {file ? (
-          <>
-            <div className="text-4xl mb-2">🎵</div>
-            <p className="text-sm font-semibold text-purple-700 truncate px-4">{file.name}</p>
-            {!isBusy && <p className="text-xs text-purple-400 mt-1">點擊換一個檔案</p>}
-          </>
-        ) : (
-          <>
-            <div className="text-5xl mb-3 opacity-30">🎵</div>
-            <p className="text-sm font-semibold text-gray-600">點擊或拖曳上傳音檔</p>
-            <p className="text-xs text-gray-400 mt-1">支援 mp3 · wav · m4a</p>
-          </>
-        )}
+      <div>
+        <label className="block text-sm font-semibold text-gray-700 mb-1.5">① 上傳音檔（mp3 / wav / m4a）</label>
+        <div
+          onClick={() => !isBusy && inputRef.current?.click()}
+          onDragOver={e => e.preventDefault()}
+          onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f && !isBusy) handleFile(f) }}
+          className={`border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition-all
+            ${isBusy ? 'border-purple-200 bg-purple-50 cursor-not-allowed'
+              : file ? 'border-purple-400 bg-purple-50'
+              : 'border-gray-200 bg-gray-50 hover:border-purple-400 hover:bg-purple-50'}`}
+        >
+          <input ref={inputRef} type="file" accept="audio/*" className="hidden"
+            onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f) }} />
+          {file
+            ? <p className="text-sm font-medium text-purple-700 truncate">🎵 {file.name}</p>
+            : <><p className="text-sm text-gray-500">點擊或拖曳上傳</p><p className="text-xs text-gray-400 mt-0.5">mp3 · wav · m4a</p></>
+          }
+        </div>
       </div>
 
-      {/* 偵測中 */}
-      {detecting && (
-        <div className="flex items-center justify-center gap-2 py-2 text-sm text-purple-600 font-medium">
-          <span className="inline-block animate-spin">⏳</span> 偵測 Key 中，請稍候…
-        </div>
-      )}
-
-      {/* 偵測結果 */}
-      {detectedKey && (
-        <div className="rounded-2xl overflow-hidden shadow-sm">
-          <div className="bg-gradient-to-r from-purple-600 to-violet-500 px-5 py-4 flex items-center justify-between text-white">
-            <div>
-              <p className="text-xs opacity-75 mb-1">偵測到的 Key</p>
-              <p className="text-4xl font-extrabold tracking-tight">{detectedKey}</p>
-            </div>
-            <div className="text-right">
-              <p className="text-xs opacity-75 mb-1">信心度</p>
-              <p className="text-3xl font-bold">{confidence}%</p>
-            </div>
+      {/* 偵測結果（預先展開，空白時顯示 placeholder） */}
+      <div>
+        <label className="block text-sm font-semibold text-gray-700 mb-1.5">② 偵測到的 Key</label>
+        <div className={`rounded-xl px-5 py-4 flex items-center justify-between transition-all
+          ${detectedKey ? 'bg-gradient-to-r from-purple-600 to-violet-500 text-white shadow-sm'
+            : 'bg-gray-100 text-gray-400'}`}>
+          <div>
+            <p className={`text-xs mb-1 ${detectedKey ? 'text-purple-200' : 'text-gray-400'}`}>原曲調性</p>
+            <p className="text-3xl font-extrabold tracking-tight">
+              {detecting ? <span className="text-lg animate-pulse">偵測中…</span> : detectedKey || '—'}
+            </p>
           </div>
+          {detectedKey && (
+            <div className="text-right">
+              <p className="text-xs text-purple-200 mb-1">信心度</p>
+              <p className="text-2xl font-bold">{confidence}%</p>
+            </div>
+          )}
         </div>
-      )}
+      </div>
 
-      {/* 目標 Key */}
-      {detectedKey && (
-        <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-1.5">移調目標 Key</label>
-          <select
-            value={targetKey}
-            onChange={e => { setTargetKey(e.target.value); setDownloadUrl('') }}
-            className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
-          >
-            {ALL_KEYS.map(k => <option key={k} value={k}>{k}{k === detectedKey ? '（原調）' : ''}</option>)}
-          </select>
-        </div>
-      )}
+      {/* 目標 Key（預先展開） */}
+      <div>
+        <label className="block text-sm font-semibold text-gray-700 mb-1.5">③ 目標 Key</label>
+        <select
+          value={targetKey}
+          onChange={e => { setTargetKey(e.target.value); setDownloadUrl('') }}
+          className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
+        >
+          {ALL_KEYS.map(k => <option key={k} value={k}>{k}{k === detectedKey ? '（原調）' : ''}</option>)}
+        </select>
+      </div>
 
-      {/* 同 Key 提示 */}
-      {detectedKey && targetKey === detectedKey && !downloadUrl && (
-        <p className="text-center text-sm text-gray-400">已是目標 Key，無需移調。</p>
-      )}
+      {/* 移調按鈕（預先展開，沒有檔案時 disabled） */}
+      <button
+        onClick={handleTranspose}
+        disabled={isBusy || !detectedKey || targetKey === detectedKey}
+        className="w-full rounded-xl bg-gradient-to-r from-purple-600 to-violet-500 text-white py-3 text-sm font-semibold shadow hover:from-purple-700 hover:to-violet-600 active:scale-95 transition disabled:opacity-40">
+        {transposing ? '移調中…' : targetKey === detectedKey && detectedKey ? '已是目標 Key' : '④ 開始移調'}
+      </button>
 
-      {/* 移調按鈕 */}
-      {detectedKey && targetKey !== detectedKey && !downloadUrl && (
-        <button onClick={handleTranspose} disabled={transposing}
-          className="w-full rounded-xl bg-gradient-to-r from-purple-600 to-violet-500 text-white py-3 text-sm font-semibold shadow hover:from-purple-700 hover:to-violet-600 active:scale-95 transition disabled:opacity-50">
-          {transposing ? '移調中…' : '🎚 開始移調'}
-        </button>
-      )}
-
-      {/* 下載 */}
+      {/* 下載（有結果才出現） */}
       {downloadUrl && (
         <a href={downloadUrl} download="transposed.wav"
           className="flex items-center justify-center gap-2 w-full rounded-xl bg-gradient-to-r from-green-500 to-emerald-500 text-white py-3 text-sm font-semibold shadow hover:from-green-600 hover:to-emerald-600 active:scale-95 transition">
@@ -161,8 +146,8 @@ function KeyDetectTab() {
         <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-600">{error}</div>
       )}
 
-      {(detectedKey || error) && (
-        <button onClick={reset} className="w-full text-xs text-gray-400 hover:text-gray-600 py-1">重新上傳</button>
+      {(file || error) && (
+        <button onClick={reset} className="w-full text-xs text-gray-400 hover:text-gray-600 py-1">重置</button>
       )}
     </div>
   )
