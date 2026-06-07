@@ -104,3 +104,20 @@ def transpose_audio(audio_path: str, detected_key: str, target_key: str) -> str:
         sf.write(out_path, y_shifted.T, sr)
 
     return out_path
+
+
+GUITAR_KEYS = [("C", 0), ("D", 2), ("E", 4), ("G", 7), ("A", 9)]
+
+
+def capo_suggestions(key_str: str) -> list[dict]:
+    try:
+        target = key_to_semitone(key_str)
+    except ValueError:
+        return []
+    results = []
+    for key_name, key_semi in GUITAR_KEYS:
+        capo = (target - key_semi) % 12
+        if capo <= 7:
+            results.append({"capo": capo, "shape": key_name})
+    results.sort(key=lambda x: x["capo"])
+    return results

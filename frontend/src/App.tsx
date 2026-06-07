@@ -38,6 +38,7 @@ function KeyDetectTab() {
   const [detecting, setDetecting] = useState(false)
   const [detectedKey, setDetectedKey] = useState('')
   const [confidence, setConfidence] = useState(0)
+  const [capo, setCapo] = useState<{capo: number, shape: string}[]>([])
   const [targetKey, setTargetKey] = useState(ALL_KEYS[0])
   const [transposing, setTransposing] = useState(false)
   const [downloadUrl, setDownloadUrl] = useState('')
@@ -46,19 +47,20 @@ function KeyDetectTab() {
   const inputRef = useRef<HTMLInputElement>(null)
 
   const reset = () => {
-    setFile(null); setDetecting(false); setDetectedKey(''); setConfidence(0)
+    setFile(null); setDetecting(false); setDetectedKey(''); setConfidence(0); setCapo([])
     setTargetKey(ALL_KEYS[0]); setTransposing(false); setDownloadUrl(''); setTransposedKey(''); setError('')
     if (inputRef.current) inputRef.current.value = ''
   }
 
   const handleFile = async (f: File) => {
-    setFile(f); setDetecting(true); setDetectedKey(''); setConfidence(0); setDownloadUrl(''); setTransposedKey(''); setError('')
+    setFile(f); setDetecting(true); setDetectedKey(''); setConfidence(0); setCapo([]); setDownloadUrl(''); setTransposedKey(''); setError('')
     const fd = new FormData(); fd.append('file', f)
     try {
       const res = await fetch('/api/detect', { method: 'POST', body: fd })
       if (!res.ok) throw new Error((await res.json()).detail)
       const data = await res.json()
       setDetectedKey(data.key); setConfidence(data.confidence); setTargetKey(data.key)
+      setCapo(data.capo || [])
     } catch (e: any) {
       setError(e.message || '偵測失敗')
     } finally {
@@ -154,6 +156,20 @@ function KeyDetectTab() {
           )}
         </div>
       </div>
+
+      {/* Capo 建議 */}
+      {capo.length > 0 && (
+        <div className="rounded-xl bg-blue-50 border border-blue-100 px-4 py-3">
+          <p className="text-xs font-semibold text-blue-500 mb-2">🎸 吉他 Capo 建議</p>
+          <div className="flex flex-wrap gap-2">
+            {capo.map(c => (
+              <span key={c.capo} className="text-xs bg-white border border-blue-200 rounded-lg px-2.5 py-1 text-blue-700 font-medium">
+                {c.capo === 0 ? '不夾 Capo' : `Capo ${c.capo}`} · {c.shape} 指型
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 目標 Key + 快速 ±1 半音 */}
       <div>
@@ -258,6 +274,23 @@ function JianpuTab() {
     return t + mod
   })
 
+  const noteAudioRef = useRef<HTMLAudioElement | null>(null)
+
+  const previewNote = async (n: string) => {
+    if (n === '0') return
+    const fd = new FormData()
+    fd.append('melody', n); fd.append('chords', ''); fd.append('key', key)
+    fd.append('bpm', '120'); fd.append('octave', String(octave)); fd.append('timbre', timbre)
+    try {
+      const res = await fetch('/api/jianpu/synth', { method: 'POST', body: fd })
+      if (!res.ok) return
+      const url = URL.createObjectURL(await res.blob())
+      if (!noteAudioRef.current) noteAudioRef.current = new Audio()
+      noteAudioRef.current.src = url
+      noteAudioRef.current.play().catch(() => {})
+    } catch {}
+  }
+
   const previewChord = async (c: string) => {
     setPreviewingChord(c)
     const fd = new FormData()
@@ -338,7 +371,7 @@ function JianpuTab() {
         <label className="text-sm font-semibold text-gray-700 block">🎵 旋律（數字簡譜）</label>
         <div className="flex flex-wrap gap-1.5">
           {['1','2','3','4','5','6','7'].map(n => (
-            <button key={n} onClick={() => appendNote(n)}
+            <button key={n} onClick={() => { appendNote(n); previewNote(n) }}
               className={`${btnBase} bg-indigo-100 text-indigo-700 hover:bg-indigo-200 w-9`}>{n}</button>
           ))}
           <button onClick={() => appendNote('0')}

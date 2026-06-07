@@ -4,7 +4,7 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from core import detect_key, transpose_audio, ALL_KEYS
+from core import detect_key, transpose_audio, ALL_KEYS, capo_suggestions
 from transcribe import transcribe_to_pdf
 from jianpu import parse_and_synth, get_diatonic_chords, MELODY_KEYS
 
@@ -40,7 +40,13 @@ async def detect(file: UploadFile = File(...)):
         raise HTTPException(status_code=422, detail=str(e))
     finally:
         os.remove(path)
+    result["capo"] = capo_suggestions(result["key"])
     return result
+
+
+@app.get("/api/capo/{key:path}")
+def capo(key: str):
+    return {"capo": capo_suggestions(key)}
 
 
 @app.post("/api/transpose")
