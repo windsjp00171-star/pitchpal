@@ -62,44 +62,62 @@ function KeyDetectTab() {
     }
   }
 
+  const isBusy = detecting || transposing
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {/* YouTube 提示 */}
-      <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
-        YouTube 音檔？先到 <a href="https://cobalt.tools" target="_blank" rel="noopener noreferrer" className="underline font-medium">cobalt.tools</a> 下載成 mp3，再上傳。
+      <div className="flex items-start gap-2 rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-xs text-amber-800">
+        <span className="text-base leading-none mt-0.5">💡</span>
+        <span>YouTube 音檔？先到 <a href="https://cobalt.tools" target="_blank" rel="noopener noreferrer" className="underline font-semibold">cobalt.tools</a> 下載成 mp3，再上傳。</span>
       </div>
 
       {/* 上傳區 */}
-      <div>
-        <label className="block text-sm font-semibold text-gray-700 mb-1">上傳音檔（mp3 / wav / m4a）</label>
-        <div
-          onClick={() => !detecting && !transposing && inputRef.current?.click()}
-          onDragOver={e => e.preventDefault()}
-          onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleFile(f) }}
-          className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center cursor-pointer hover:border-purple-400 hover:bg-purple-50 transition-colors"
-        >
-          <input ref={inputRef} type="file" accept="audio/*" className="hidden"
-            onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f) }} />
-          {file
-            ? <p className="text-sm text-gray-700 truncate">📄 {file.name}</p>
-            : <p className="text-sm text-gray-400">點擊或拖曳上傳</p>
-          }
-        </div>
+      <div
+        onClick={() => !isBusy && inputRef.current?.click()}
+        onDragOver={e => e.preventDefault()}
+        onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f && !isBusy) handleFile(f) }}
+        className={`relative border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all
+          ${isBusy ? 'border-purple-200 bg-purple-50 cursor-not-allowed'
+            : file ? 'border-purple-400 bg-purple-50'
+            : 'border-gray-200 bg-gray-50 hover:border-purple-400 hover:bg-purple-50'}`}
+      >
+        <input ref={inputRef} type="file" accept="audio/*" className="hidden"
+          onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f) }} />
+        {file ? (
+          <>
+            <div className="text-4xl mb-2">🎵</div>
+            <p className="text-sm font-semibold text-purple-700 truncate px-4">{file.name}</p>
+            {!isBusy && <p className="text-xs text-purple-400 mt-1">點擊換一個檔案</p>}
+          </>
+        ) : (
+          <>
+            <div className="text-5xl mb-3 opacity-30">🎵</div>
+            <p className="text-sm font-semibold text-gray-600">點擊或拖曳上傳音檔</p>
+            <p className="text-xs text-gray-400 mt-1">支援 mp3 · wav · m4a</p>
+          </>
+        )}
       </div>
 
       {/* 偵測中 */}
-      {detecting && <p className="text-sm text-purple-500 animate-pulse">⏳ 偵測中，請稍候…</p>}
+      {detecting && (
+        <div className="flex items-center justify-center gap-2 py-2 text-sm text-purple-600 font-medium">
+          <span className="inline-block animate-spin">⏳</span> 偵測 Key 中，請稍候…
+        </div>
+      )}
 
       {/* 偵測結果 */}
       {detectedKey && (
-        <div className="rounded-lg bg-purple-50 border border-purple-200 px-4 py-3 flex items-center justify-between">
-          <div>
-            <p className="text-xs text-purple-400 mb-0.5">偵測到的 Key</p>
-            <p className="text-3xl font-bold text-purple-700">{detectedKey}</p>
-          </div>
-          <div className="text-right">
-            <p className="text-xs text-purple-400 mb-0.5">信心度</p>
-            <p className="text-2xl font-semibold text-purple-600">{confidence}%</p>
+        <div className="rounded-2xl overflow-hidden shadow-sm">
+          <div className="bg-gradient-to-r from-purple-600 to-violet-500 px-5 py-4 flex items-center justify-between text-white">
+            <div>
+              <p className="text-xs opacity-75 mb-1">偵測到的 Key</p>
+              <p className="text-4xl font-extrabold tracking-tight">{detectedKey}</p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs opacity-75 mb-1">信心度</p>
+              <p className="text-3xl font-bold">{confidence}%</p>
+            </div>
           </div>
         </div>
       )}
@@ -107,42 +125,44 @@ function KeyDetectTab() {
       {/* 目標 Key */}
       {detectedKey && (
         <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-1">目標 Key（選擇後移調）</label>
+          <label className="block text-sm font-semibold text-gray-700 mb-1.5">移調目標 Key</label>
           <select
             value={targetKey}
             onChange={e => { setTargetKey(e.target.value); setDownloadUrl('') }}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-purple-400"
+            className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
           >
             {ALL_KEYS.map(k => <option key={k} value={k}>{k}{k === detectedKey ? '（原調）' : ''}</option>)}
           </select>
         </div>
       )}
 
+      {/* 同 Key 提示 */}
+      {detectedKey && targetKey === detectedKey && !downloadUrl && (
+        <p className="text-center text-sm text-gray-400">已是目標 Key，無需移調。</p>
+      )}
+
       {/* 移調按鈕 */}
       {detectedKey && targetKey !== detectedKey && !downloadUrl && (
         <button onClick={handleTranspose} disabled={transposing}
-          className="w-full rounded-lg bg-purple-600 text-white py-2.5 text-sm font-semibold hover:bg-purple-700 active:scale-95 transition disabled:opacity-50">
-          {transposing ? '移調中…' : '開始移調'}
+          className="w-full rounded-xl bg-gradient-to-r from-purple-600 to-violet-500 text-white py-3 text-sm font-semibold shadow hover:from-purple-700 hover:to-violet-600 active:scale-95 transition disabled:opacity-50">
+          {transposing ? '移調中…' : '🎚 開始移調'}
         </button>
-      )}
-
-      {/* 同 Key 提示 */}
-      {detectedKey && targetKey === detectedKey && (
-        <p className="text-sm text-gray-400">已是目標 Key，無需移調。</p>
       )}
 
       {/* 下載 */}
       {downloadUrl && (
         <a href={downloadUrl} download="transposed.wav"
-          className="block w-full rounded-lg bg-green-600 text-white py-2.5 text-sm font-semibold text-center hover:bg-green-700 active:scale-95 transition">
+          className="flex items-center justify-center gap-2 w-full rounded-xl bg-gradient-to-r from-green-500 to-emerald-500 text-white py-3 text-sm font-semibold shadow hover:from-green-600 hover:to-emerald-600 active:scale-95 transition">
           ⬇ 下載移調音檔
         </a>
       )}
 
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      {error && (
+        <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-600">{error}</div>
+      )}
 
       {(detectedKey || error) && (
-        <button onClick={reset} className="text-xs text-gray-400 hover:text-gray-600">重新上傳</button>
+        <button onClick={reset} className="w-full text-xs text-gray-400 hover:text-gray-600 py-1">重新上傳</button>
       )}
     </div>
   )
@@ -195,76 +215,77 @@ function JianpuTab() {
     }
   }
 
-  const btnBase = "px-3 py-1.5 rounded-md text-sm font-medium active:scale-95 transition"
+  const btnBase = "px-3 py-1.5 rounded-lg text-sm font-medium active:scale-95 transition shadow-sm"
 
   return (
-    <div className="space-y-4">
-      {/* 說明 */}
+    <div className="space-y-5">
       <p className="text-xs text-gray-500">輸入數字簡譜與和弦進行，合成音頻試聽。旋律與和弦皆為選填。</p>
 
       {/* 參數列 */}
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="text-xs font-semibold text-gray-600 mb-1 block">調性</label>
-          <select value={key} onChange={e => setKey(e.target.value)}
-            className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
-            {MELODY_KEYS.map(k => <option key={k}>{k}</option>)}
-          </select>
+      <div className="bg-gray-50 rounded-2xl p-4 space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs font-semibold text-gray-500 mb-1 block">調性</label>
+            <select value={key} onChange={e => setKey(e.target.value)}
+              className="w-full rounded-xl border border-gray-200 px-2 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400">
+              {MELODY_KEYS.map(k => <option key={k}>{k}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-gray-500 mb-1 block">音色</label>
+            <select value={timbre} onChange={e => setTimbre(e.target.value)}
+              className="w-full rounded-xl border border-gray-200 px-2 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400">
+              {TIMBRES.map(t => <option key={t}>{t}</option>)}
+            </select>
+          </div>
         </div>
         <div>
-          <label className="text-xs font-semibold text-gray-600 mb-1 block">音色</label>
-          <select value={timbre} onChange={e => setTimbre(e.target.value)}
-            className="w-full rounded-lg border border-gray-300 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400">
-            {TIMBRES.map(t => <option key={t}>{t}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="text-xs font-semibold text-gray-600 mb-1 block">BPM：{bpm}</label>
+          <label className="text-xs font-semibold text-gray-500 mb-1 block">BPM：<span className="text-indigo-600 font-bold">{bpm}</span></label>
           <input type="range" min={40} max={200} value={bpm} onChange={e => setBpm(+e.target.value)}
             className="w-full accent-indigo-500" />
         </div>
         <div>
-          <label className="text-xs font-semibold text-gray-600 mb-1 block">八度：{octave}</label>
+          <label className="text-xs font-semibold text-gray-500 mb-1 block">八度：<span className="text-indigo-600 font-bold">{octave}</span></label>
           <input type="range" min={3} max={5} value={octave} onChange={e => setOctave(+e.target.value)}
             className="w-full accent-indigo-500" />
         </div>
+        <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+          <input type="checkbox" checked={metronome} onChange={e => setMetronome(e.target.checked)} className="accent-indigo-500" />
+          加入節拍器
+        </label>
       </div>
-      <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
-        <input type="checkbox" checked={metronome} onChange={e => setMetronome(e.target.checked)} className="accent-indigo-500" />
-        加入節拍器
-      </label>
 
       {/* 旋律區 */}
-      <div>
-        <label className="text-sm font-semibold text-gray-700 mb-2 block">🎵 旋律（數字簡譜）</label>
-        <div className="flex flex-wrap gap-1.5 mb-2">
+      <div className="space-y-2">
+        <label className="text-sm font-semibold text-gray-700 block">🎵 旋律（數字簡譜）</label>
+        <div className="flex flex-wrap gap-1.5">
           {['1','2','3','4','5','6','7'].map(n => (
             <button key={n} onClick={() => appendNote(n)}
-              className={`${btnBase} bg-indigo-100 text-indigo-700 hover:bg-indigo-200`}>{n}</button>
+              className={`${btnBase} bg-indigo-100 text-indigo-700 hover:bg-indigo-200 w-9`}>{n}</button>
           ))}
           <button onClick={() => appendNote('0')}
-            className={`${btnBase} bg-gray-100 text-gray-600 hover:bg-gray-200`}>0 休</button>
+            className={`${btnBase} bg-gray-100 text-gray-600 hover:bg-gray-200`}>休止</button>
         </div>
-        <div className="flex flex-wrap gap-1.5 mb-2">
-          {[['#','升#'],["b",'降b'],["'","↑八'"],[',"↓八,'],['_','八分_'],['__','十六__'],['--','延音--'],['|','|小節']].map(([val,label]) => (
+        <div className="flex flex-wrap gap-1.5">
+          {[['#','#升'],["b",'b降'],["'","↑八"],[',"↓八'],['_','⅛'],['__','⅟₁₆'],['--','延音'],['|','小節|']].map(([val,label]) => (
             <button key={val} onClick={() => val === '|' ? appendNote('|') : appendMod(val)}
               className={`${btnBase} bg-gray-100 text-gray-500 hover:bg-gray-200 text-xs`}>{label}</button>
           ))}
         </div>
         <textarea value={melody} onChange={e => setMelody(e.target.value)}
           placeholder="例：5 6 7 5 3 - - - | 7 5 6 -"
-          rows={3} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400" />
-        <button onClick={() => setMelody('')} className="text-xs text-gray-400 hover:text-gray-600 mt-1">清空</button>
+          rows={3} className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-mono bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+        {melody && <button onClick={() => setMelody('')} className="text-xs text-gray-400 hover:text-red-400">清空旋律</button>}
       </div>
 
       {/* 和弦區 */}
-      <div>
-        <label className="text-sm font-semibold text-gray-700 mb-2 block">🎸 和弦進行</label>
+      <div className="space-y-2">
+        <label className="text-sm font-semibold text-gray-700 block">🎸 和弦進行</label>
         {diatonicChords.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mb-2">
+          <div className="flex flex-wrap gap-1.5">
             {diatonicChords.map(c => (
               <button key={c} onClick={() => appendChord(c)}
-                className={`${btnBase} bg-green-100 text-green-700 hover:bg-green-200`}>{c}</button>
+                className={`${btnBase} bg-emerald-100 text-emerald-700 hover:bg-emerald-200`}>{c}</button>
             ))}
             <button onClick={() => appendChord('|')}
               className={`${btnBase} bg-gray-100 text-gray-500 hover:bg-gray-200`}>|</button>
@@ -272,22 +293,25 @@ function JianpuTab() {
         )}
         <textarea value={chords} onChange={e => setChords(e.target.value)}
           placeholder="例：C Em7 | D | G/B | Em7 D"
-          rows={2} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400" />
-        <button onClick={() => setChords('')} className="text-xs text-gray-400 hover:text-gray-600 mt-1">清空</button>
+          rows={2} className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-mono bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+        {chords && <button onClick={() => setChords('')} className="text-xs text-gray-400 hover:text-red-400">清空和弦</button>}
       </div>
 
       {/* 合成按鈕 */}
       <button onClick={handleSynth} disabled={loading}
-        className="w-full rounded-lg bg-indigo-600 text-white py-2.5 text-sm font-semibold hover:bg-indigo-700 active:scale-95 transition disabled:opacity-50">
+        className="w-full rounded-xl bg-gradient-to-r from-indigo-600 to-violet-500 text-white py-3 text-sm font-semibold shadow hover:from-indigo-700 hover:to-violet-600 active:scale-95 transition disabled:opacity-50">
         {loading ? '合成中…' : '▶ 合成試聽'}
       </button>
 
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      {error && <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-600">{error}</div>}
 
       {audioUrl && (
-        <div className="rounded-lg bg-green-50 border border-green-200 p-3 space-y-2">
+        <div className="rounded-2xl bg-emerald-50 border border-emerald-200 p-4 space-y-3">
           <audio controls src={audioUrl} className="w-full" />
-          <a href={audioUrl} download="preview.wav" className="text-xs text-green-600 hover:underline block text-center">⬇ 下載音檔</a>
+          <a href={audioUrl} download="preview.wav"
+            className="flex items-center justify-center gap-1 text-xs text-emerald-700 hover:text-emerald-900 font-medium">
+            ⬇ 下載音檔
+          </a>
         </div>
       )}
     </div>
@@ -327,58 +351,68 @@ function TranscribeTab() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <p className="text-xs text-gray-500">上傳詩歌音檔，自動辨識主旋律，輸出 PDF 樂譜。適合旋律清晰的錄音。</p>
 
       {/* 上傳 */}
-      <div>
-        <label className="text-sm font-semibold text-gray-700 mb-1 block">上傳音檔（mp3 / wav / m4a）</label>
-        <div
-          onClick={() => !loading && inputRef.current?.click()}
-          onDragOver={e => e.preventDefault()}
-          onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f && !loading) setFile(f) }}
-          className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors"
-        >
-          <input ref={inputRef} type="file" accept="audio/*" className="hidden"
-            onChange={e => { const f = e.target.files?.[0]; if (f) setFile(f) }} />
-          {file
-            ? <p className="text-sm text-gray-700 truncate">📄 {file.name}</p>
-            : <p className="text-sm text-gray-400">點擊或拖曳上傳</p>
-          }
-        </div>
+      <div
+        onClick={() => !loading && inputRef.current?.click()}
+        onDragOver={e => e.preventDefault()}
+        onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f && !loading) setFile(f) }}
+        className={`border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer transition-all
+          ${loading ? 'border-blue-200 bg-blue-50 cursor-not-allowed'
+            : file ? 'border-blue-400 bg-blue-50'
+            : 'border-gray-200 bg-gray-50 hover:border-blue-400 hover:bg-blue-50'}`}
+      >
+        <input ref={inputRef} type="file" accept="audio/*" className="hidden"
+          onChange={e => { const f = e.target.files?.[0]; if (f) setFile(f) }} />
+        {file ? (
+          <>
+            <div className="text-4xl mb-2">📄</div>
+            <p className="text-sm font-semibold text-blue-700 truncate px-4">{file.name}</p>
+          </>
+        ) : (
+          <>
+            <div className="text-5xl mb-3 opacity-30">🎼</div>
+            <p className="text-sm font-semibold text-gray-600">點擊或拖曳上傳音檔</p>
+            <p className="text-xs text-gray-400 mt-1">支援 mp3 · wav · m4a</p>
+          </>
+        )}
       </div>
 
       {/* 標題 / 作曲者 */}
-      <div>
-        <label className="text-sm font-semibold text-gray-700 mb-1 block">樂譜標題（選填）</label>
-        <input type="text" value={title} onChange={e => setTitle(e.target.value)}
-          placeholder="例：Amazing Grace"
-          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
-      </div>
-      <div>
-        <label className="text-sm font-semibold text-gray-700 mb-1 block">作曲者（選填）</label>
-        <input type="text" value={composer} onChange={e => setComposer(e.target.value)}
-          placeholder="例：John Newton"
-          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400" />
+      <div className="space-y-3">
+        <div>
+          <label className="text-sm font-semibold text-gray-700 mb-1.5 block">樂譜標題（選填）</label>
+          <input type="text" value={title} onChange={e => setTitle(e.target.value)}
+            placeholder="例：Amazing Grace"
+            className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-400" />
+        </div>
+        <div>
+          <label className="text-sm font-semibold text-gray-700 mb-1.5 block">作曲者（選填）</label>
+          <input type="text" value={composer} onChange={e => setComposer(e.target.value)}
+            placeholder="例：John Newton"
+            className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-400" />
+        </div>
       </div>
 
       {/* 轉譜按鈕 */}
       <button onClick={handleTranscribe} disabled={!file || loading}
-        className="w-full rounded-lg bg-blue-600 text-white py-2.5 text-sm font-semibold hover:bg-blue-700 active:scale-95 transition disabled:opacity-50">
-        {loading ? '轉譜中，約 30 秒…' : '開始轉譜'}
+        className="w-full rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 text-white py-3 text-sm font-semibold shadow hover:from-blue-700 hover:to-cyan-600 active:scale-95 transition disabled:opacity-50">
+        {loading ? '⏳ 轉譜中，約 30 秒…' : '🎼 開始轉譜'}
       </button>
 
       {downloadUrl && (
         <a href={downloadUrl} download="score.pdf"
-          className="block w-full rounded-lg bg-green-600 text-white py-2.5 text-sm font-semibold text-center hover:bg-green-700 active:scale-95 transition">
+          className="flex items-center justify-center gap-2 w-full rounded-xl bg-gradient-to-r from-green-500 to-emerald-500 text-white py-3 text-sm font-semibold shadow hover:from-green-600 hover:to-emerald-600 active:scale-95 transition">
           ⬇ 下載 PDF 樂譜
         </a>
       )}
 
-      {error && <p className="text-sm text-red-500">{error}</p>}
+      {error && <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-600">{error}</div>}
 
       {(file || error) && (
-        <button onClick={reset} className="text-xs text-gray-400 hover:text-gray-600">重新上傳</button>
+        <button onClick={reset} className="w-full text-xs text-gray-400 hover:text-gray-600 py-1">重新上傳</button>
       )}
     </div>
   )
@@ -390,37 +424,37 @@ export default function App() {
   const [tab, setTab] = useState<Tab>('detect')
 
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-indigo-50">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-2">
-        <span className="text-xl">🎵</span>
+      <div className="bg-gradient-to-r from-purple-700 to-violet-600 px-4 py-4 flex items-center gap-3 shadow-md">
+        <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center text-xl">🎵</div>
         <div>
-          <h1 className="text-base font-bold text-gray-800 leading-none">PitchPal</h1>
-          <p className="text-xs text-gray-400 mt-0.5">敬拜調性工具</p>
+          <h1 className="text-lg font-extrabold text-white leading-none tracking-tight">PitchPal</h1>
+          <p className="text-xs text-purple-200 mt-0.5">敬拜調性工具</p>
         </div>
       </div>
 
       {/* Tab bar */}
-      <div className="bg-white border-b border-gray-200 flex">
+      <div className="bg-white border-b border-gray-100 flex shadow-sm">
         {([
           ['detect', '辨識 Key / 移調', 'purple'],
           ['jianpu', '旋律試聽', 'indigo'],
           ['transcribe', '音檔轉譜', 'blue'],
         ] as [Tab, string, string][]).map(([id, label, color]) => (
           <button key={id} onClick={() => setTab(id)}
-            className={`flex-1 py-3 text-xs font-semibold border-b-2 transition-colors
+            className={`flex-1 py-3.5 text-xs font-bold border-b-2 transition-colors
               ${tab === id
-                ? color === 'purple' ? 'border-purple-600 text-purple-600'
-                  : color === 'indigo' ? 'border-indigo-600 text-indigo-600'
-                  : 'border-blue-600 text-blue-600'
-                : 'border-transparent text-gray-400 hover:text-gray-600'}`}>
+                ? color === 'purple' ? 'border-purple-600 text-purple-600 bg-purple-50/50'
+                  : color === 'indigo' ? 'border-indigo-600 text-indigo-600 bg-indigo-50/50'
+                  : 'border-blue-600 text-blue-600 bg-blue-50/50'
+                : 'border-transparent text-gray-400 hover:text-gray-600 hover:bg-gray-50'}`}>
             {label}
           </button>
         ))}
       </div>
 
       {/* Content */}
-      <div className="max-w-lg mx-auto px-4 py-5">
+      <div className="max-w-lg mx-auto px-4 py-6">
         {tab === 'detect' && <KeyDetectTab />}
         {tab === 'jianpu' && <JianpuTab />}
         {tab === 'transcribe' && <TranscribeTab />}
