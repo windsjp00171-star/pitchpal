@@ -134,12 +134,15 @@ function KeyDetectTab() {
         {transposing ? '移調中…' : targetKey === detectedKey && detectedKey ? '已是目標 Key' : '④ 開始移調'}
       </button>
 
-      {/* 下載（有結果才出現） */}
+      {/* 播放 + 下載（有結果才出現） */}
       {downloadUrl && (
-        <a href={downloadUrl} download="transposed.wav"
-          className="flex items-center justify-center gap-2 w-full rounded-xl bg-gradient-to-r from-green-500 to-emerald-500 text-white py-3 text-sm font-semibold shadow hover:from-green-600 hover:to-emerald-600 active:scale-95 transition">
-          ⬇ 下載移調音檔
-        </a>
+        <div className="rounded-xl bg-green-50 border border-green-200 p-4 space-y-3">
+          <audio controls src={downloadUrl} className="w-full" />
+          <a href={downloadUrl} download="transposed.wav"
+            className="flex items-center justify-center gap-2 w-full rounded-xl bg-gradient-to-r from-green-500 to-emerald-500 text-white py-2.5 text-sm font-semibold shadow hover:from-green-600 hover:to-emerald-600 active:scale-95 transition">
+            ⬇ 下載移調音檔
+          </a>
+        </div>
       )}
 
       {error && (
