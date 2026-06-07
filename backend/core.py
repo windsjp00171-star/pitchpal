@@ -89,10 +89,10 @@ def transpose_audio(audio_path: str, detected_key: str, target_key: str) -> str:
     if steps == 0:
         y_shifted = y
     elif y.ndim == 1:
-        y_shifted = librosa.effects.pitch_shift(y, sr=sr, n_steps=steps)
+        y_shifted = librosa.effects.pitch_shift(y, sr=sr, n_steps=steps, res_type='kaiser_best')
     else:
         y_shifted = np.stack([
-            librosa.effects.pitch_shift(y[ch], sr=sr, n_steps=steps)
+            librosa.effects.pitch_shift(y[ch], sr=sr, n_steps=steps, res_type='kaiser_best')
             for ch in range(y.shape[0])
         ])
 

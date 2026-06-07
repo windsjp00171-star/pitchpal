@@ -133,11 +133,73 @@ def _tone_organ(freq, duration, sr, rng):
     return (wave * env * 0.28).astype(np.float32)
 
 
+def _tone_flute(freq, duration, sr, rng):
+    n = int(sr * duration)
+    if n == 0:
+        return np.zeros(0, dtype=np.float32)
+    t = np.linspace(0, duration, n, endpoint=False)
+    vibrato = 1.0 + 0.003 * np.sin(2 * np.pi * 5.5 * t)
+    wave = (np.sin(2 * np.pi * np.cumsum(freq * vibrato) / sr)
+            + 0.18 * np.sin(2 * np.pi * 2 * freq * t)
+            + 0.04 * np.sin(2 * np.pi * 3 * freq * t))
+    env = np.ones(n, dtype=np.float32)
+    atk = min(int(0.06 * sr), n)
+    env[:atk] *= np.linspace(0, 1, atk) ** 1.5
+    fade = min(int(0.02 * sr), n)
+    env[n - fade:] *= np.linspace(1, 0, fade)
+    return ((wave + rng.uniform(-1, 1, n) * 0.04) * env * 0.42 * rng.uniform(0.90, 1.10)).astype(np.float32)
+
+
+def _tone_harp(freq, duration, sr, rng):
+    period = max(2, int(sr / freq))
+    n = int(sr * duration)
+    if n == 0:
+        return np.zeros(0, dtype=np.float32)
+    x = np.zeros(n, dtype=np.float64)
+    x[:period] = rng.uniform(-1.0, 1.0, period) + np.sin(np.linspace(0, np.pi, period)) * 0.5
+    coeff = rng.uniform(0.994, 0.997)
+    a = np.zeros(period + 2)
+    a[0] = 1.0; a[period] = -coeff * 0.5; a[period + 1] = -coeff * 0.5
+    out = lfilter([1.0], a, x) * np.exp(-1.0 * np.linspace(0, 1, n))
+    echo_delay = int(0.025 * sr)
+    if echo_delay < n:
+        out[echo_delay:] += out[:-echo_delay] * 0.18
+    fade = min(int(0.02 * sr), n)
+    out[n - fade:] *= np.linspace(1, 0, fade)
+    return (out * 0.72 * rng.uniform(0.85, 1.15)).astype(np.float32)
+
+
+def _tone_violin(freq, duration, sr, rng):
+    n = int(sr * duration)
+    if n == 0:
+        return np.zeros(0, dtype=np.float32)
+    t = np.linspace(0, duration, n, endpoint=False)
+    vib_depth = np.clip(np.linspace(0, 0.008, n), 0, 0.008)
+    phase = np.cumsum(2 * np.pi * freq * (1.0 + vib_depth * np.sin(2 * np.pi * 5.8 * t)) / sr)
+    wave = sum(amp * np.sin(h * phase) for h, amp in [(1,1.0),(2,0.45),(3,0.28),(4,0.18),(5,0.12),(6,0.08)])
+    b_hp, a_hp = butter(2, 800 / (sr / 2), btype="high")
+    b_lp, a_lp = butter(2, 3000 / (sr / 2), btype="low")
+    bow_noise = sosfilt(butter(2, [800, 3000], btype="band", fs=sr, output="sos"),
+                        rng.uniform(-1, 1, n)) * np.exp(-6.0 * np.linspace(0, 1, n)) * 0.35
+    env = np.ones(n, dtype=np.float32)
+    atk = min(int(0.06 * sr), n)
+    env[:atk] *= np.linspace(0, 1, atk) ** 1.5
+    fade = min(int(0.03 * sr), n)
+    env[n - fade:] *= np.linspace(1, 0, fade)
+    return ((wave + bow_noise) * env * 0.24 * rng.uniform(0.88, 1.12)).astype(np.float32)
+
+
 def _tone(freq, duration, sr, timbre, rng):
     if timbre == "吉他":
         return _tone_guitar(freq, duration, sr, rng)
+    if timbre == "長笛":
+        return _tone_flute(freq, duration, sr, rng)
     if timbre == "管風琴":
         return _tone_organ(freq, duration, sr, rng)
+    if timbre == "豎琴":
+        return _tone_harp(freq, duration, sr, rng)
+    if timbre == "小提琴":
+        return _tone_violin(freq, duration, sr, rng)
     return _tone_piano(freq, duration, sr, rng)
 
 
