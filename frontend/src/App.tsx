@@ -8,7 +8,7 @@ const ALL_KEYS = [
 ]
 
 const MELODY_KEYS = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']
-const TIMBRES = ['鋼琴', '吉他', '管風琴']
+const TIMBRES = ['鋼琴', '吉他', '長笛', '管風琴', '豎琴', '小提琴']
 
 type Tab = 'detect' | 'jianpu' | 'transcribe'
 
@@ -83,7 +83,25 @@ function KeyDetectTab() {
     }
   }
 
+  const audioRef = useRef<HTMLAudioElement>(null)
+
   const changeTarget = (k: string) => { setTargetKey(k); setDownloadUrl(''); setTransposedKey('') }
+
+  const shiftAndTranspose = (delta: number) => {
+    const k = shiftKey(targetKey, delta)
+    setTargetKey(k); setDownloadUrl(''); setTransposedKey('')
+    if (file && detectedKey && k !== detectedKey) {
+      // slight delay so state updates first
+      setTimeout(() => handleTranspose(k), 0)
+    }
+  }
+
+  // autoplay when new download url arrives
+  useEffect(() => {
+    if (downloadUrl && audioRef.current) {
+      audioRef.current.play().catch(() => {})
+    }
+  }, [downloadUrl])
 
   const isBusy = detecting || transposing
 
@@ -142,7 +160,7 @@ function KeyDetectTab() {
         <label className="block text-sm font-semibold text-gray-700 mb-1.5">③ 目標 Key</label>
         <div className="flex gap-2 items-center">
           <button
-            onClick={() => changeTarget(shiftKey(targetKey, -1))}
+            onClick={() => shiftAndTranspose(-1)}
             disabled={isBusy || !detectedKey}
             className="flex-none w-11 h-11 rounded-xl border border-gray-200 bg-white text-lg font-bold text-gray-600 hover:bg-purple-50 hover:border-purple-300 active:scale-95 transition disabled:opacity-30">
             ↓
@@ -155,7 +173,7 @@ function KeyDetectTab() {
             {ALL_KEYS.map(k => <option key={k} value={k}>{k}{k === detectedKey ? '（原調）' : ''}</option>)}
           </select>
           <button
-            onClick={() => changeTarget(shiftKey(targetKey, 1))}
+            onClick={() => shiftAndTranspose(1)}
             disabled={isBusy || !detectedKey}
             className="flex-none w-11 h-11 rounded-xl border border-gray-200 bg-white text-lg font-bold text-gray-600 hover:bg-purple-50 hover:border-purple-300 active:scale-95 transition disabled:opacity-30">
             ↑
@@ -184,7 +202,7 @@ function KeyDetectTab() {
               </span>
             </span>
           </div>
-          <audio controls src={downloadUrl} className="w-full" />
+          <audio ref={audioRef} controls src={downloadUrl} className="w-full" />
           <a href={downloadUrl} download="transposed.wav"
             className="flex items-center justify-center gap-2 w-full rounded-xl bg-gradient-to-r from-green-500 to-emerald-500 text-white py-2.5 text-sm font-semibold shadow hover:from-green-600 hover:to-emerald-600 active:scale-95 transition">
             ⬇ 下載移調音檔
@@ -205,9 +223,12 @@ function KeyDetectTab() {
 
 // ─── 旋律試聽 ─────────────────────────────────────────────────────────────────
 
+const LS_MELODY = 'pitchpal_melody'
+const LS_CHORDS = 'pitchpal_chords'
+
 function JianpuTab() {
-  const [melody, setMelody] = useState('')
-  const [chords, setChords] = useState('')
+  const [melody, setMelody] = useState(() => localStorage.getItem(LS_MELODY) || '')
+  const [chords, setChords] = useState(() => localStorage.getItem(LS_CHORDS) || '')
   const [key, setKey] = useState('G')
   const [bpm, setBpm] = useState(80)
   const [octave, setOctave] = useState(4)
@@ -217,6 +238,11 @@ function JianpuTab() {
   const [audioUrl, setAudioUrl] = useState('')
   const [error, setError] = useState('')
   const [diatonicChords, setDiatonicChords] = useState<string[]>([])
+  const [previewingChord, setPreviewingChord] = useState('')
+  const chordAudioRef = useRef<HTMLAudioElement | null>(null)
+
+  useEffect(() => { localStorage.setItem(LS_MELODY, melody) }, [melody])
+  useEffect(() => { localStorage.setItem(LS_CHORDS, chords) }, [chords])
 
   useEffect(() => {
     fetch(`/api/jianpu/chords/${key}`)
@@ -231,6 +257,22 @@ function JianpuTab() {
     if (last && last !== '|') return t.slice(0, lastSpace + 1) + last + mod
     return t + mod
   })
+
+  const previewChord = async (c: string) => {
+    setPreviewingChord(c)
+    const fd = new FormData()
+    fd.append('melody', ''); fd.append('chords', c); fd.append('key', key)
+    fd.append('bpm', String(bpm)); fd.append('octave', String(octave)); fd.append('timbre', timbre)
+    try {
+      const res = await fetch('/api/jianpu/synth', { method: 'POST', body: fd })
+      if (!res.ok) return
+      const url = URL.createObjectURL(await res.blob())
+      if (chordAudioRef.current) { chordAudioRef.current.src = url; chordAudioRef.current.play().catch(() => {}) }
+    } finally {
+      setPreviewingChord('')
+    }
+  }
+
   const appendChord = (c: string) => setChords(ch => ch ? ch + ' ' + c : c)
 
   const handleSynth = async () => {
@@ -317,11 +359,17 @@ function JianpuTab() {
       {/* 和弦區 */}
       <div className="space-y-2">
         <label className="text-sm font-semibold text-gray-700 block">🎸 和弦進行</label>
+        <audio ref={chordAudioRef} className="hidden" />
         {diatonicChords.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {diatonicChords.map(c => (
-              <button key={c} onClick={() => appendChord(c)}
-                className={`${btnBase} bg-emerald-100 text-emerald-700 hover:bg-emerald-200`}>{c}</button>
+              <button key={c}
+                onClick={() => { previewChord(c); appendChord(c) }}
+                onContextMenu={e => { e.preventDefault(); previewChord(c) }}
+                disabled={previewingChord === c}
+                className={`${btnBase} bg-emerald-100 text-emerald-700 hover:bg-emerald-200 disabled:opacity-50`}>
+                {previewingChord === c ? '…' : c}
+              </button>
             ))}
             <button onClick={() => appendChord('|')}
               className={`${btnBase} bg-gray-100 text-gray-500 hover:bg-gray-200`}>|</button>
