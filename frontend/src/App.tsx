@@ -242,6 +242,12 @@ function KeyDetectTab() {
 const LS_MELODY = 'pitchpal_melody'
 const LS_CHORDS = 'pitchpal_chords'
 
+const CHORD_QUALITIES = ['基本','m','m7','7','maj7','sus4','sus2','add9','dim']
+const QUALITY_SUFFIX: Record<string, string> = {
+  '基本':'', 'm':'m', 'm7':'m7', '7':'7', 'maj7':'maj7',
+  'sus4':'sus4', 'sus2':'sus2', 'add9':'add9', 'dim':'dim',
+}
+
 function JianpuTab() {
   const [melody, setMelody] = useState(() => localStorage.getItem(LS_MELODY) || '')
   const [chords, setChords] = useState(() => localStorage.getItem(LS_CHORDS) || '')
@@ -255,17 +261,38 @@ function JianpuTab() {
   const [error, setError] = useState('')
   const [diatonicChords, setDiatonicChords] = useState<string[]>([])
   const [previewingChord, setPreviewingChord] = useState('')
+  const [noteMode, setNoteMode] = useState<'試音'|'加入'>('加入')
+  const [chordQuality, setChordQuality] = useState('基本')
+  // sticky modifier toggles
+  const [mods, setMods] = useState({ sharp: false, flat: false, high: false, low: false })
   const chordAudioRef = useRef<HTMLAudioElement | null>(null)
+  const noteAudioRef = useRef<HTMLAudioElement | null>(null)
 
   useEffect(() => { localStorage.setItem(LS_MELODY, melody) }, [melody])
   useEffect(() => { localStorage.setItem(LS_CHORDS, chords) }, [chords])
-
   useEffect(() => {
     fetch(`/api/jianpu/chords/${key}`)
       .then(r => r.json()).then(d => setDiatonicChords(d.chords)).catch(() => {})
   }, [key])
 
-  const appendNote = (n: string) => setMelody(m => m ? m + ' ' + n : n)
+  const toggleMod = (mod: 'sharp'|'flat'|'high'|'low') => setMods(prev => {
+    const next = { ...prev, [mod]: !prev[mod] }
+    if (mod === 'sharp' && next.sharp) next.flat = false
+    if (mod === 'flat'  && next.flat)  next.sharp = false
+    if (mod === 'high'  && next.high)  next.low = false
+    if (mod === 'low'   && next.low)   next.high = false
+    return next
+  })
+
+  const buildNoteToken = (n: string) => {
+    let tok = n
+    if (mods.sharp) tok += '#'
+    else if (mods.flat) tok += 'b'
+    if (mods.high) tok += "'"
+    else if (mods.low) tok += ','
+    return tok
+  }
+
   const appendMod = (mod: string) => setMelody(m => {
     const t = m.trimEnd()
     const lastSpace = t.lastIndexOf(' ')
@@ -274,21 +301,20 @@ function JianpuTab() {
     return t + mod
   })
 
-  const noteAudioRef = useRef<HTMLAudioElement | null>(null)
-
-  const previewNote = async (n: string) => {
-    if (n === '0') return
-    const fd = new FormData()
-    fd.append('melody', n); fd.append('chords', ''); fd.append('key', key)
-    fd.append('bpm', '120'); fd.append('octave', String(octave)); fd.append('timbre', timbre)
-    try {
-      const res = await fetch('/api/jianpu/synth', { method: 'POST', body: fd })
-      if (!res.ok) return
-      const url = URL.createObjectURL(await res.blob())
-      if (!noteAudioRef.current) noteAudioRef.current = new Audio()
-      noteAudioRef.current.src = url
-      noteAudioRef.current.play().catch(() => {})
-    } catch {}
+  const handleNoteClick = async (n: string) => {
+    // preview
+    const tok = n === '0' ? '0' : buildNoteToken(n)
+    if (n !== '0') {
+      const fd = new FormData()
+      fd.append('melody', tok); fd.append('chords', ''); fd.append('key', key)
+      fd.append('bpm', '120'); fd.append('octave', String(octave)); fd.append('timbre', timbre)
+      fetch('/api/jianpu/synth', { method: 'POST', body: fd })
+        .then(r => r.ok ? r.blob() : null)
+        .then(b => { if (b) { if (!noteAudioRef.current) noteAudioRef.current = new Audio(); noteAudioRef.current.src = URL.createObjectURL(b); noteAudioRef.current.play().catch(() => {}) } })
+        .catch(() => {})
+    }
+    // append if mode = 加入
+    if (noteMode === '加入') setMelody(m => m ? m + ' ' + tok : tok)
   }
 
   const previewChord = async (c: string) => {
@@ -300,13 +326,20 @@ function JianpuTab() {
       const res = await fetch('/api/jianpu/synth', { method: 'POST', body: fd })
       if (!res.ok) return
       const url = URL.createObjectURL(await res.blob())
-      if (chordAudioRef.current) { chordAudioRef.current.src = url; chordAudioRef.current.play().catch(() => {}) }
-    } finally {
-      setPreviewingChord('')
-    }
+      if (!chordAudioRef.current) chordAudioRef.current = new Audio()
+      chordAudioRef.current.src = url; chordAudioRef.current.play().catch(() => {})
+    } finally { setPreviewingChord('') }
   }
 
-  const appendChord = (c: string) => setChords(ch => ch ? ch + ' ' + c : c)
+  const handleChordClick = (base: string) => {
+    const suffix = QUALITY_SUFFIX[chordQuality] || ''
+    // strip existing quality if base already has one, then apply selected quality
+    const rootMatch = base.match(/^([A-G][#b]?)(.*)$/)
+    const root = rootMatch ? rootMatch[1] : base
+    const c = root + suffix
+    previewChord(c)
+    setChords(ch => ch ? ch + ' ' + c : c)
+  }
 
   const handleSynth = async () => {
     if (!melody.trim() && !chords.trim()) { setError('請輸入旋律或和弦。'); return }
@@ -321,12 +354,11 @@ function JianpuTab() {
       setAudioUrl(URL.createObjectURL(await res.blob()))
     } catch (e: any) {
       setError(e.message || '合成失敗')
-    } finally {
-      setLoading(false)
-    }
+    } finally { setLoading(false) }
   }
 
   const btnBase = "px-3 py-1.5 rounded-lg text-sm font-medium active:scale-95 transition shadow-sm"
+  const modBtn = (active: boolean) => `${btnBase} ${active ? 'bg-indigo-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`
 
   return (
     <div className="space-y-5">
@@ -336,7 +368,7 @@ function JianpuTab() {
       <div className="bg-gray-50 rounded-2xl p-4 space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="text-xs font-semibold text-gray-500 mb-1 block">調性</label>
+            <label className="text-xs font-semibold text-gray-500 mb-1 block">調性（1=?）</label>
             <select value={key} onChange={e => setKey(e.target.value)}
               className="w-full rounded-xl border border-gray-200 px-2 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400">
               {MELODY_KEYS.map(k => <option key={k}>{k}</option>)}
@@ -352,13 +384,11 @@ function JianpuTab() {
         </div>
         <div>
           <label className="text-xs font-semibold text-gray-500 mb-1 block">BPM：<span className="text-indigo-600 font-bold">{bpm}</span></label>
-          <input type="range" min={40} max={200} value={bpm} onChange={e => setBpm(+e.target.value)}
-            className="w-full accent-indigo-500" />
+          <input type="range" min={40} max={200} value={bpm} onChange={e => setBpm(+e.target.value)} className="w-full accent-indigo-500" />
         </div>
         <div>
           <label className="text-xs font-semibold text-gray-500 mb-1 block">八度：<span className="text-indigo-600 font-bold">{octave}</span></label>
-          <input type="range" min={3} max={5} value={octave} onChange={e => setOctave(+e.target.value)}
-            className="w-full accent-indigo-500" />
+          <input type="range" min={3} max={5} value={octave} onChange={e => setOctave(+e.target.value)} className="w-full accent-indigo-500" />
         </div>
         <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
           <input type="checkbox" checked={metronome} onChange={e => setMetronome(e.target.checked)} className="accent-indigo-500" />
@@ -368,21 +398,47 @@ function JianpuTab() {
 
       {/* 旋律區 */}
       <div className="space-y-2">
-        <label className="text-sm font-semibold text-gray-700 block">🎵 旋律（數字簡譜）</label>
+        <div className="flex items-center justify-between">
+          <label className="text-sm font-semibold text-gray-700">🎵 旋律（數字簡譜）</label>
+          <div className="flex rounded-lg overflow-hidden border border-gray-200 text-xs">
+            {(['加入','試音'] as const).map(m => (
+              <button key={m} onClick={() => setNoteMode(m)}
+                className={`px-2.5 py-1 font-medium transition ${noteMode === m ? 'bg-indigo-500 text-white' : 'bg-white text-gray-500 hover:bg-gray-50'}`}>
+                {m}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 音符按鈕 */}
         <div className="flex flex-wrap gap-1.5">
           {['1','2','3','4','5','6','7'].map(n => (
-            <button key={n} onClick={() => { appendNote(n); previewNote(n) }}
+            <button key={n} onClick={() => handleNoteClick(n)}
               className={`${btnBase} bg-indigo-100 text-indigo-700 hover:bg-indigo-200 w-9`}>{n}</button>
           ))}
-          <button onClick={() => appendNote('0')}
+          <button onClick={() => handleNoteClick('0')}
             className={`${btnBase} bg-gray-100 text-gray-600 hover:bg-gray-200`}>休止</button>
         </div>
+
+        {/* Toggle 修飾符 */}
         <div className="flex flex-wrap gap-1.5">
-          {[['#','#升'],["b",'b降'],["'","↑八"],[',"↓八'],['_','⅛'],['__','⅟₁₆'],['--','延音'],['|','小節|']].map(([val,label]) => (
-            <button key={val} onClick={() => val === '|' ? appendNote('|') : appendMod(val)}
+          <span className="text-xs text-gray-400 self-center">半音：</span>
+          <button onClick={() => toggleMod('sharp')} className={modBtn(mods.sharp)}># 升</button>
+          <button onClick={() => toggleMod('flat')}  className={modBtn(mods.flat)}>b 降</button>
+          <span className="text-xs text-gray-400 self-center ml-1">八度：</span>
+          <button onClick={() => toggleMod('high')} className={modBtn(mods.high)}>↑ 高八</button>
+          <button onClick={() => toggleMod('low')}  className={modBtn(mods.low)}>↓ 低八</button>
+        </div>
+
+        {/* 時值修飾符（直接 append） */}
+        <div className="flex flex-wrap gap-1.5">
+          <span className="text-xs text-gray-400 self-center">時值：</span>
+          {[['_','⅛八分'],['__','⅟₁₆十六'],['-','延音'],['|','小節|']].map(([val,label]) => (
+            <button key={val} onClick={() => val === '|' ? setMelody(m => m ? m + ' |' : '|') : appendMod(val)}
               className={`${btnBase} bg-gray-100 text-gray-500 hover:bg-gray-200 text-xs`}>{label}</button>
           ))}
         </div>
+
         <textarea value={melody} onChange={e => setMelody(e.target.value)}
           placeholder="例：5 6 7 5 3 - - - | 7 5 6 -"
           rows={3} className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-mono bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-400" />
@@ -392,19 +448,28 @@ function JianpuTab() {
       {/* 和弦區 */}
       <div className="space-y-2">
         <label className="text-sm font-semibold text-gray-700 block">🎸 和弦進行</label>
-        <audio ref={chordAudioRef} className="hidden" />
+
+        {/* 和弦色彩 */}
+        <div className="flex flex-wrap gap-1.5">
+          <span className="text-xs text-gray-400 self-center">色彩：</span>
+          {CHORD_QUALITIES.map(q => (
+            <button key={q} onClick={() => setChordQuality(q)}
+              className={`${btnBase} text-xs ${chordQuality === q ? 'bg-violet-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+              {q}
+            </button>
+          ))}
+        </div>
+
         {diatonicChords.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {diatonicChords.map(c => (
-              <button key={c}
-                onClick={() => { previewChord(c); appendChord(c) }}
-                onContextMenu={e => { e.preventDefault(); previewChord(c) }}
-                disabled={previewingChord === c}
+              <button key={c} onClick={() => handleChordClick(c)}
+                disabled={previewingChord !== ''}
                 className={`${btnBase} bg-emerald-100 text-emerald-700 hover:bg-emerald-200 disabled:opacity-50`}>
-                {previewingChord === c ? '…' : c}
+                {c}
               </button>
             ))}
-            <button onClick={() => appendChord('|')}
+            <button onClick={() => setChords(ch => ch ? ch + ' |' : '|')}
               className={`${btnBase} bg-gray-100 text-gray-500 hover:bg-gray-200`}>|</button>
           </div>
         )}
@@ -439,27 +504,28 @@ function JianpuTab() {
 
 function TranscribeTab() {
   const [file, setFile] = useState<File | null>(null)
-  const [title, setTitle] = useState('')
-  const [composer, setComposer] = useState('')
+  const [key, setKey] = useState('C')
+  const [bpm, setBpm] = useState(80)
   const [loading, setLoading] = useState(false)
-  const [downloadUrl, setDownloadUrl] = useState('')
+  const [result, setResult] = useState<{melody: string, chords: string} | null>(null)
   const [error, setError] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 
   const reset = () => {
-    setFile(null); setDownloadUrl(''); setError('')
+    setFile(null); setResult(null); setError('')
     if (inputRef.current) inputRef.current.value = ''
   }
 
   const handleTranscribe = async () => {
     if (!file) return
-    setLoading(true); setError(''); setDownloadUrl('')
+    setLoading(true); setError(''); setResult(null)
     const fd = new FormData()
-    fd.append('file', file); fd.append('title', title); fd.append('composer', composer)
+    fd.append('file', file); fd.append('key', key); fd.append('bpm', String(bpm))
     try {
       const res = await fetch('/api/transcribe', { method: 'POST', body: fd })
       if (!res.ok) throw new Error((await res.json()).detail)
-      setDownloadUrl(URL.createObjectURL(await res.blob()))
+      const data = await res.json()
+      setResult({ melody: data.melody, chords: data.chords })
     } catch (e: any) {
       setError(e.message || '轉譜失敗')
     } finally {
@@ -467,9 +533,15 @@ function TranscribeTab() {
     }
   }
 
+  const copyToJianpu = () => {
+    if (!result) return
+    localStorage.setItem(LS_MELODY, result.melody)
+    localStorage.setItem(LS_CHORDS, result.chords)
+  }
+
   return (
     <div className="space-y-5">
-      <p className="text-xs text-gray-500">上傳詩歌音檔，自動辨識主旋律，輸出 PDF 樂譜。適合旋律清晰的錄音。</p>
+      <p className="text-xs text-gray-500">上傳詩歌音檔，自動辨識主旋律與和弦，輸出數字簡譜粗稿。適合旋律清晰的錄音。</p>
 
       {/* 上傳 */}
       <div
@@ -497,19 +569,18 @@ function TranscribeTab() {
         )}
       </div>
 
-      {/* 標題 / 作曲者 */}
-      <div className="space-y-3">
+      {/* 調性 / BPM */}
+      <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="text-sm font-semibold text-gray-700 mb-1.5 block">樂譜標題（選填）</label>
-          <input type="text" value={title} onChange={e => setTitle(e.target.value)}
-            placeholder="例：Amazing Grace"
-            className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-400" />
+          <label className="text-xs font-semibold text-gray-500 mb-1 block">調性（1=?）</label>
+          <select value={key} onChange={e => setKey(e.target.value)}
+            className="w-full rounded-xl border border-gray-200 px-2 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-400">
+            {MELODY_KEYS.map(k => <option key={k}>{k}</option>)}
+          </select>
         </div>
         <div>
-          <label className="text-sm font-semibold text-gray-700 mb-1.5 block">作曲者（選填）</label>
-          <input type="text" value={composer} onChange={e => setComposer(e.target.value)}
-            placeholder="例：John Newton"
-            className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-400" />
+          <label className="text-xs font-semibold text-gray-500 mb-1 block">BPM：<span className="text-blue-600 font-bold">{bpm}</span></label>
+          <input type="range" min={40} max={200} value={bpm} onChange={e => setBpm(+e.target.value)} className="w-full accent-blue-500 mt-2" />
         </div>
       </div>
 
@@ -519,11 +590,24 @@ function TranscribeTab() {
         {loading ? '⏳ 轉譜中，約 30 秒…' : '🎼 開始轉譜'}
       </button>
 
-      {downloadUrl && (
-        <a href={downloadUrl} download="score.pdf"
-          className="flex items-center justify-center gap-2 w-full rounded-xl bg-gradient-to-r from-green-500 to-emerald-500 text-white py-3 text-sm font-semibold shadow hover:from-green-600 hover:to-emerald-600 active:scale-95 transition">
-          ⬇ 下載 PDF 樂譜
-        </a>
+      {result && (
+        <div className="rounded-2xl bg-blue-50 border border-blue-200 p-4 space-y-3">
+          <p className="text-xs font-semibold text-blue-500">轉譜粗稿（可複製到旋律試聽編輯）</p>
+          <div>
+            <label className="text-xs text-gray-500 font-medium block mb-1">旋律</label>
+            <textarea readOnly value={result.melody} rows={4}
+              className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-mono bg-white focus:outline-none" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 font-medium block mb-1">和弦</label>
+            <textarea readOnly value={result.chords} rows={2}
+              className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm font-mono bg-white focus:outline-none" />
+          </div>
+          <button onClick={copyToJianpu}
+            className="w-full rounded-xl bg-gradient-to-r from-indigo-500 to-violet-500 text-white py-2.5 text-sm font-semibold shadow hover:from-indigo-600 hover:to-violet-600 active:scale-95 transition">
+            → 送到旋律試聽 Tab
+          </button>
+        </div>
       )}
 
       {error && <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-600">{error}</div>}

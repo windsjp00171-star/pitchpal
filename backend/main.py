@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from core import detect_key, transpose_audio, ALL_KEYS, capo_suggestions
-from transcribe import transcribe_to_pdf
+from transcribe import transcribe_to_jianpu
 from jianpu import parse_and_synth, get_diatonic_chords, MELODY_KEYS
 
 app = FastAPI(title="PitchPal API")
@@ -76,19 +76,17 @@ async def transpose(
 @app.post("/api/transcribe")
 async def transcribe(
     file: UploadFile = File(...),
-    title: str = Form(""),
-    composer: str = Form(""),
+    key: str = Form("C"),
+    bpm: int = Form(80),
 ):
     path = _save_upload(file)
     try:
-        pdf_path, msg = transcribe_to_pdf(path, title, composer)
+        result = transcribe_to_jianpu(path, key, bpm)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         os.remove(path)
-    if pdf_path is None:
-        raise HTTPException(status_code=422, detail=msg)
-    return FileResponse(pdf_path, media_type="application/pdf", filename="score.pdf")
+    return result
 
 
 @app.get("/api/jianpu/keys")
