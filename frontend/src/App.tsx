@@ -14,6 +14,27 @@ type Tab = 'detect' | 'jianpu' | 'transcribe'
 
 // ─── 辨識 Key / 移調 ──────────────────────────────────────────────────────────
 
+// 把 Key 字串轉成 ALL_KEYS 的 index，方便 +/-1
+function keyIndex(k: string) { return ALL_KEYS.indexOf(k) }
+function shiftKey(k: string, delta: number) {
+  const majorKeys = ALL_KEYS.slice(0, 12)
+  const minorKeys = ALL_KEYS.slice(12)
+  const isMajor = majorKeys.includes(k)
+  const arr = isMajor ? majorKeys : minorKeys
+  const idx = arr.indexOf(k)
+  if (idx === -1) return k
+  return arr[(idx + delta + 12) % 12]
+}
+function semitonesBetween(from: string, to: string) {
+  const majorKeys = ALL_KEYS.slice(0, 12)
+  const minorKeys = ALL_KEYS.slice(12)
+  const arr = majorKeys.includes(from) ? majorKeys : minorKeys
+  let d = arr.indexOf(to) - arr.indexOf(from)
+  if (d > 6) d -= 12
+  if (d < -6) d += 12
+  return d
+}
+
 function KeyDetectTab() {
   const [file, setFile] = useState<File | null>(null)
   const [detecting, setDetecting] = useState(false)
@@ -22,17 +43,18 @@ function KeyDetectTab() {
   const [targetKey, setTargetKey] = useState(ALL_KEYS[0])
   const [transposing, setTransposing] = useState(false)
   const [downloadUrl, setDownloadUrl] = useState('')
+  const [transposedKey, setTransposedKey] = useState('')
   const [error, setError] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 
   const reset = () => {
     setFile(null); setDetecting(false); setDetectedKey(''); setConfidence(0)
-    setTargetKey(ALL_KEYS[0]); setTransposing(false); setDownloadUrl(''); setError('')
+    setTargetKey(ALL_KEYS[0]); setTransposing(false); setDownloadUrl(''); setTransposedKey(''); setError('')
     if (inputRef.current) inputRef.current.value = ''
   }
 
   const handleFile = async (f: File) => {
-    setFile(f); setDetecting(true); setDetectedKey(''); setConfidence(0); setDownloadUrl(''); setError('')
+    setFile(f); setDetecting(true); setDetectedKey(''); setConfidence(0); setDownloadUrl(''); setTransposedKey(''); setError('')
     const fd = new FormData(); fd.append('file', f)
     try {
       const res = await fetch('/api/detect', { method: 'POST', body: fd })
@@ -46,21 +68,24 @@ function KeyDetectTab() {
     }
   }
 
-  const handleTranspose = async () => {
-    if (!file || !detectedKey || !targetKey) return
-    setTransposing(true); setError(''); setDownloadUrl('')
+  const handleTranspose = async (key = targetKey) => {
+    if (!file || !detectedKey || !key) return
+    setTransposing(true); setError(''); setDownloadUrl(''); setTransposedKey('')
     const fd = new FormData()
-    fd.append('file', file); fd.append('detected_key', detectedKey); fd.append('target_key', targetKey)
+    fd.append('file', file); fd.append('detected_key', detectedKey); fd.append('target_key', key)
     try {
       const res = await fetch('/api/transpose', { method: 'POST', body: fd })
       if (!res.ok) throw new Error((await res.json()).detail)
       setDownloadUrl(URL.createObjectURL(await res.blob()))
+      setTransposedKey(key)
     } catch (e: any) {
       setError(e.message || '移調失敗')
     } finally {
       setTransposing(false)
     }
   }
+
+  const changeTarget = (k: string) => { setTargetKey(k); setDownloadUrl(''); setTransposedKey('') }
 
   const isBusy = detecting || transposing
 
@@ -93,7 +118,7 @@ function KeyDetectTab() {
         </div>
       </div>
 
-      {/* 偵測結果（預先展開，空白時顯示 placeholder） */}
+      {/* 偵測結果 */}
       <div>
         <label className="block text-sm font-semibold text-gray-700 mb-1.5">② 偵測到的 Key</label>
         <div className={`rounded-xl px-5 py-4 flex items-center justify-between transition-all
@@ -114,29 +139,53 @@ function KeyDetectTab() {
         </div>
       </div>
 
-      {/* 目標 Key（預先展開） */}
+      {/* 目標 Key + 快速 ±1 半音 */}
       <div>
         <label className="block text-sm font-semibold text-gray-700 mb-1.5">③ 目標 Key</label>
-        <select
-          value={targetKey}
-          onChange={e => { setTargetKey(e.target.value); setDownloadUrl('') }}
-          className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
-        >
-          {ALL_KEYS.map(k => <option key={k} value={k}>{k}{k === detectedKey ? '（原調）' : ''}</option>)}
-        </select>
+        <div className="flex gap-2 items-center">
+          <button
+            onClick={() => changeTarget(shiftKey(targetKey, -1))}
+            disabled={isBusy || !detectedKey}
+            className="flex-none w-11 h-11 rounded-xl border border-gray-200 bg-white text-lg font-bold text-gray-600 hover:bg-purple-50 hover:border-purple-300 active:scale-95 transition disabled:opacity-30">
+            ↓
+          </button>
+          <select
+            value={targetKey}
+            onChange={e => changeTarget(e.target.value)}
+            className="flex-1 rounded-xl border border-gray-200 px-3 py-2.5 text-sm bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
+          >
+            {ALL_KEYS.map(k => <option key={k} value={k}>{k}{k === detectedKey ? '（原調）' : ''}</option>)}
+          </select>
+          <button
+            onClick={() => changeTarget(shiftKey(targetKey, 1))}
+            disabled={isBusy || !detectedKey}
+            className="flex-none w-11 h-11 rounded-xl border border-gray-200 bg-white text-lg font-bold text-gray-600 hover:bg-purple-50 hover:border-purple-300 active:scale-95 transition disabled:opacity-30">
+            ↑
+          </button>
+        </div>
       </div>
 
-      {/* 移調按鈕（預先展開，沒有檔案時 disabled） */}
+      {/* 移調按鈕 */}
       <button
-        onClick={handleTranspose}
+        onClick={() => handleTranspose()}
         disabled={isBusy || !detectedKey || targetKey === detectedKey}
         className="w-full rounded-xl bg-gradient-to-r from-purple-600 to-violet-500 text-white py-3 text-sm font-semibold shadow hover:from-purple-700 hover:to-violet-600 active:scale-95 transition disabled:opacity-40">
-        {transposing ? '移調中…' : targetKey === detectedKey && detectedKey ? '已是目標 Key' : '④ 開始移調'}
+        {transposing ? '移調中…' : targetKey === detectedKey && detectedKey ? '已是原調，無需移調' : '④ 開始移調'}
       </button>
 
-      {/* 播放 + 下載（有結果才出現） */}
-      {downloadUrl && (
+      {/* 移調結果：Key 名 + 播放器 + 下載 */}
+      {downloadUrl && transposedKey && (
         <div className="rounded-xl bg-green-50 border border-green-200 p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-green-600 font-medium">移調完成</span>
+            <span className="text-sm font-bold text-green-700">
+              {detectedKey} → {transposedKey}
+              {' '}
+              <span className="text-xs font-normal text-green-500">
+                ({semitonesBetween(detectedKey, transposedKey) > 0 ? '+' : ''}{semitonesBetween(detectedKey, transposedKey)} 半音)
+              </span>
+            </span>
+          </div>
           <audio controls src={downloadUrl} className="w-full" />
           <a href={downloadUrl} download="transposed.wav"
             className="flex items-center justify-center gap-2 w-full rounded-xl bg-gradient-to-r from-green-500 to-emerald-500 text-white py-2.5 text-sm font-semibold shadow hover:from-green-600 hover:to-emerald-600 active:scale-95 transition">
@@ -179,9 +228,10 @@ function JianpuTab() {
   const appendNote = (n: string) => setMelody(m => m ? m + ' ' + n : n)
   const appendMod = (mod: string) => setMelody(m => {
     const t = m.trimEnd()
-    const last = t.slice(t.lastIndexOf(' ') + 1)
-    if (last && !'|'.includes(last)) return t.slice(0, t.length - last.length) + last + mod
-    return m + mod
+    const lastSpace = t.lastIndexOf(' ')
+    const last = t.slice(lastSpace + 1)
+    if (last && last !== '|') return t.slice(0, lastSpace + 1) + last + mod
+    return t + mod
   })
   const appendChord = (c: string) => setChords(ch => ch ? ch + ' ' + c : c)
 
