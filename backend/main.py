@@ -123,7 +123,6 @@ async def synth(
 _here = os.path.dirname(__file__)
 for _candidate in [
     os.path.join(_here, "..", "frontend", "dist"),   # 本機開發
-    os.path.join(_here, "..", "frontend", "dist"),   # Docker WORKDIR /app
     "/app/frontend/dist",                             # Docker 絕對路徑
 ]:
     if os.path.exists(_candidate):
