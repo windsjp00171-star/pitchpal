@@ -23,15 +23,6 @@ function shiftKey(k: string, delta: number) {
   if (idx === -1) return k
   return arr[(idx + delta + 12) % 12]
 }
-function semitonesBetween(from: string, to: string) {
-  const majorKeys = ALL_KEYS.slice(0, 12)
-  const minorKeys = ALL_KEYS.slice(12)
-  const arr = majorKeys.includes(from) ? majorKeys : minorKeys
-  let d = arr.indexOf(to) - arr.indexOf(from)
-  if (d > 6) d -= 12
-  if (d < -6) d += 12
-  return d
-}
 
 function KeyDetectTab() {
   const [file, setFile] = useState<File | null>(null)
