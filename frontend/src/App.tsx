@@ -35,32 +35,51 @@ function semitonesBetween(from: string, to: string) {
 
 function KeyDetectTab() {
   const [file, setFile] = useState<File | null>(null)
+  const [originalUrl, setOriginalUrl] = useState('')
   const [detecting, setDetecting] = useState(false)
   const [detectedKey, setDetectedKey] = useState('')
+  const [manualKey, setManualKey] = useState('')   // override if detection is wrong
   const [confidence, setConfidence] = useState(0)
   const [capo, setCapo] = useState<{capo: number, shape: string}[]>([])
-  const [targetKey, setTargetKey] = useState(ALL_KEYS[0])
+  const [steps, setSteps] = useState(0)            // semitone slider -12~+12
   const [transposing, setTransposing] = useState(false)
   const [downloadUrl, setDownloadUrl] = useState('')
   const [transposedKey, setTransposedKey] = useState('')
   const [error, setError] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
+  const resultAudioRef = useRef<HTMLAudioElement>(null)
+
+  // effective source key: manual override wins
+  const effectiveKey = manualKey || detectedKey
+
+  // derived target key from slider steps
+  const targetKey = effectiveKey ? shiftKey(effectiveKey, steps) : ''
+
+  // update capo when target key changes
+  useEffect(() => {
+    if (!targetKey) return
+    fetch(`/api/capo/${encodeURIComponent(targetKey)}`)
+      .then(r => r.json()).then(d => setCapo(d.capo || [])).catch(() => {})
+  }, [targetKey])
 
   const reset = () => {
-    setFile(null); setDetecting(false); setDetectedKey(''); setConfidence(0); setCapo([])
-    setTargetKey(ALL_KEYS[0]); setTransposing(false); setDownloadUrl(''); setTransposedKey(''); setError('')
+    setFile(null); setOriginalUrl(''); setDetecting(false); setDetectedKey(''); setManualKey('')
+    setConfidence(0); setCapo([]); setSteps(0); setTransposing(false)
+    setDownloadUrl(''); setTransposedKey(''); setError('')
     if (inputRef.current) inputRef.current.value = ''
   }
 
   const handleFile = async (f: File) => {
-    setFile(f); setDetecting(true); setDetectedKey(''); setConfidence(0); setCapo([]); setDownloadUrl(''); setTransposedKey(''); setError('')
+    setFile(f)
+    setOriginalUrl(URL.createObjectURL(f))
+    setDetecting(true); setDetectedKey(''); setManualKey(''); setConfidence(0); setCapo([])
+    setDownloadUrl(''); setTransposedKey(''); setSteps(0); setError('')
     const fd = new FormData(); fd.append('file', f)
     try {
       const res = await fetch('/api/detect', { method: 'POST', body: fd })
       if (!res.ok) throw new Error((await res.json()).detail)
       const data = await res.json()
-      setDetectedKey(data.key); setConfidence(data.confidence); setTargetKey(data.key)
-      setCapo(data.capo || [])
+      setDetectedKey(data.key); setConfidence(data.confidence); setCapo(data.capo || [])
     } catch (e: any) {
       setError(e.message || '偵測失敗')
     } finally {
@@ -68,16 +87,16 @@ function KeyDetectTab() {
     }
   }
 
-  const handleTranspose = async (key = targetKey) => {
-    if (!file || !detectedKey || !key) return
+  const handleTranspose = async () => {
+    if (!file || !effectiveKey || steps === 0) return
     setTransposing(true); setError(''); setDownloadUrl(''); setTransposedKey('')
     const fd = new FormData()
-    fd.append('file', file); fd.append('detected_key', detectedKey); fd.append('target_key', key)
+    fd.append('file', file); fd.append('detected_key', effectiveKey); fd.append('target_key', targetKey)
     try {
       const res = await fetch('/api/transpose', { method: 'POST', body: fd })
       if (!res.ok) throw new Error((await res.json()).detail)
       setDownloadUrl(URL.createObjectURL(await res.blob()))
-      setTransposedKey(key)
+      setTransposedKey(targetKey)
     } catch (e: any) {
       setError(e.message || '移調失敗')
     } finally {
@@ -85,27 +104,15 @@ function KeyDetectTab() {
     }
   }
 
-  const audioRef = useRef<HTMLAudioElement>(null)
-
-  const changeTarget = (k: string) => { setTargetKey(k); setDownloadUrl(''); setTransposedKey('') }
-
-  const shiftAndTranspose = (delta: number) => {
-    const k = shiftKey(targetKey, delta)
-    setTargetKey(k); setDownloadUrl(''); setTransposedKey('')
-    if (file && detectedKey && k !== detectedKey) {
-      // slight delay so state updates first
-      setTimeout(() => handleTranspose(k), 0)
-    }
-  }
-
-  // autoplay when new download url arrives
   useEffect(() => {
-    if (downloadUrl && audioRef.current) {
-      audioRef.current.play().catch(() => {})
+    if (downloadUrl && resultAudioRef.current) {
+      resultAudioRef.current.play().catch(() => {})
     }
   }, [downloadUrl])
 
   const isBusy = detecting || transposing
+
+  const confColor = confidence >= 70 ? 'text-green-300' : confidence >= 40 ? 'text-yellow-300' : 'text-red-300'
 
   return (
     <div className="space-y-4">
@@ -115,7 +122,7 @@ function KeyDetectTab() {
         <span>YouTube 音檔？先到 <a href="https://cobalt.tools" target="_blank" rel="noopener noreferrer" className="underline font-semibold">cobalt.tools</a> 下載成 mp3，再上傳。</span>
       </div>
 
-      {/* 上傳區 */}
+      {/* ① 上傳區 */}
       <div>
         <label className="block text-sm font-semibold text-gray-700 mb-1.5">① 上傳音檔（mp3 / wav / m4a）</label>
         <div
@@ -134,9 +141,11 @@ function KeyDetectTab() {
             : <><p className="text-sm text-gray-500">點擊或拖曳上傳</p><p className="text-xs text-gray-400 mt-0.5">mp3 · wav · m4a</p></>
           }
         </div>
+        {/* 原音播放器 — 上傳後立即顯示 */}
+        {originalUrl && <audio controls src={originalUrl} className="w-full mt-2" />}
       </div>
 
-      {/* 偵測結果 */}
+      {/* ② 偵測結果 + 手動修正 */}
       <div>
         <label className="block text-sm font-semibold text-gray-700 mb-1.5">② 偵測到的 Key</label>
         <div className={`rounded-xl px-5 py-4 flex items-center justify-between transition-all
@@ -151,16 +160,30 @@ function KeyDetectTab() {
           {detectedKey && (
             <div className="text-right">
               <p className="text-xs text-purple-200 mb-1">信心度</p>
-              <p className="text-2xl font-bold">{confidence}%</p>
+              <p className={`text-2xl font-bold ${confColor}`}>{confidence}%</p>
             </div>
           )}
         </div>
+        {/* 手動修正：偵測不準時可自行選 */}
+        {detectedKey && (
+          <div className="mt-2 flex items-center gap-2">
+            <span className="text-xs text-gray-400 whitespace-nowrap">偵測不準？手動修正：</span>
+            <select
+              value={manualKey}
+              onChange={e => { setManualKey(e.target.value); setDownloadUrl(''); setTransposedKey(''); setSteps(0) }}
+              className="flex-1 rounded-lg border border-gray-200 px-2 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-purple-300"
+            >
+              <option value="">（使用自動偵測：{detectedKey}）</option>
+              {ALL_KEYS.map(k => <option key={k} value={k}>{k}</option>)}
+            </select>
+          </div>
+        )}
       </div>
 
-      {/* Capo 建議 */}
+      {/* Capo 建議（根據目標 Key 動態更新） */}
       {capo.length > 0 && (
         <div className="rounded-xl bg-blue-50 border border-blue-100 px-4 py-3">
-          <p className="text-xs font-semibold text-blue-500 mb-2">🎸 吉他 Capo 建議</p>
+          <p className="text-xs font-semibold text-blue-500 mb-2">🎸 吉他 Capo 建議（{targetKey || effectiveKey}）</p>
           <div className="flex flex-wrap gap-2">
             {capo.map(c => (
               <span key={c.capo} className="text-xs bg-white border border-blue-200 rounded-lg px-2.5 py-1 text-blue-700 font-medium">
@@ -171,38 +194,37 @@ function KeyDetectTab() {
         </div>
       )}
 
-      {/* 目標 Key + 快速 ±1 半音 */}
+      {/* ③ 移調半音 Slider */}
       <div>
-        <label className="block text-sm font-semibold text-gray-700 mb-1.5">③ 目標 Key</label>
-        <div className="flex gap-2 items-center">
-          <button
-            onClick={() => shiftAndTranspose(-1)}
-            disabled={isBusy || !detectedKey}
-            className="flex-none w-11 h-11 rounded-xl border border-gray-200 bg-white text-lg font-bold text-gray-600 hover:bg-purple-50 hover:border-purple-300 active:scale-95 transition disabled:opacity-30">
-            ↓
-          </button>
-          <select
-            value={targetKey}
-            onChange={e => changeTarget(e.target.value)}
-            className="flex-1 rounded-xl border border-gray-200 px-3 py-2.5 text-sm bg-white shadow-sm focus:outline-none focus:ring-2 focus:ring-purple-400"
-          >
-            {ALL_KEYS.map(k => <option key={k} value={k}>{k}{k === detectedKey ? '（原調）' : ''}</option>)}
-          </select>
-          <button
-            onClick={() => shiftAndTranspose(1)}
-            disabled={isBusy || !detectedKey}
-            className="flex-none w-11 h-11 rounded-xl border border-gray-200 bg-white text-lg font-bold text-gray-600 hover:bg-purple-50 hover:border-purple-300 active:scale-95 transition disabled:opacity-30">
-            ↑
-          </button>
+        <div className="flex items-center justify-between mb-1.5">
+          <label className="text-sm font-semibold text-gray-700">③ 移調半音數</label>
+          <span className="text-sm font-bold text-purple-600">
+            {steps > 0 ? `+${steps}` : steps} 半音
+            {targetKey && effectiveKey && targetKey !== effectiveKey && (
+              <span className="ml-2 text-xs font-normal text-gray-500">→ {targetKey}</span>
+            )}
+            {steps === 0 && effectiveKey && (
+              <span className="ml-2 text-xs font-normal text-gray-400">（原調）</span>
+            )}
+          </span>
+        </div>
+        <input
+          type="range" min={-12} max={12} value={steps}
+          onChange={e => { setSteps(+e.target.value); setDownloadUrl(''); setTransposedKey('') }}
+          disabled={isBusy || !effectiveKey}
+          className="w-full accent-purple-500 disabled:opacity-30"
+        />
+        <div className="flex justify-between text-xs text-gray-400 mt-0.5 px-0.5">
+          <span>-12</span><span>0</span><span>+12</span>
         </div>
       </div>
 
-      {/* 移調按鈕 */}
+      {/* ④ 移調按鈕 */}
       <button
-        onClick={() => handleTranspose()}
-        disabled={isBusy || !detectedKey || targetKey === detectedKey}
+        onClick={handleTranspose}
+        disabled={isBusy || !effectiveKey || steps === 0}
         className="w-full rounded-xl bg-gradient-to-r from-purple-600 to-violet-500 text-white py-3 text-sm font-semibold shadow hover:from-purple-700 hover:to-violet-600 active:scale-95 transition disabled:opacity-40">
-        {transposing ? '移調中…' : targetKey === detectedKey && detectedKey ? '已是原調，無需移調' : '④ 開始移調'}
+        {transposing ? '移調中…' : steps === 0 && effectiveKey ? '已是原調（調整半音後移調）' : '④ 開始移調'}
       </button>
 
       {/* 移調結果：Key 名 + 播放器 + 下載 */}
@@ -211,14 +233,13 @@ function KeyDetectTab() {
           <div className="flex items-center justify-between">
             <span className="text-xs text-green-600 font-medium">移調完成</span>
             <span className="text-sm font-bold text-green-700">
-              {detectedKey} → {transposedKey}
-              {' '}
-              <span className="text-xs font-normal text-green-500">
-                ({semitonesBetween(detectedKey, transposedKey) > 0 ? '+' : ''}{semitonesBetween(detectedKey, transposedKey)} 半音)
+              {effectiveKey} → {transposedKey}
+              <span className="ml-1 text-xs font-normal text-green-500">
+                ({steps > 0 ? '+' : ''}{steps} 半音)
               </span>
             </span>
           </div>
-          <audio ref={audioRef} controls src={downloadUrl} className="w-full" />
+          <audio ref={resultAudioRef} controls src={downloadUrl} className="w-full" />
           <a href={downloadUrl} download="transposed.wav"
             className="flex items-center justify-center gap-2 w-full rounded-xl bg-gradient-to-r from-green-500 to-emerald-500 text-white py-2.5 text-sm font-semibold shadow hover:from-green-600 hover:to-emerald-600 active:scale-95 transition">
             ⬇ 下載移調音檔
