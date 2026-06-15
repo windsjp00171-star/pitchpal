@@ -1632,7 +1632,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                 # ── 旋律欄 ────────────────────────────────────────────────
                 with gr.Column(scale=5):
                     gr.Markdown("**🎵 旋律**", elem_classes="section-header")
-                    note_preview = gr.Audio(label="試音", autoplay=True, visible=True, show_download_button=False)
+                    note_preview = gr.Audio(label="試音", autoplay=True, visible=True)
                     with gr.Row():
                         note_mode = gr.Radio(
                             choices=["只試音", "加入輸入框"], value="只試音",
@@ -1672,7 +1672,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                 # ── 和弦欄 ────────────────────────────────────────────────
                 with gr.Column(scale=5):
                     gr.Markdown("**🎸 和弦**", elem_classes="section-header")
-                    chord_preview = gr.Audio(label="試音", autoplay=True, visible=True, show_download_button=False)
+                    chord_preview = gr.Audio(label="試音", autoplay=True, visible=True)
                     with gr.Row():
                         chord_mode = gr.Radio(
                             choices=["只試音", "加入輸入框"], value="只試音",
