@@ -1881,6 +1881,13 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                 outputs=[transcribe_melody_out, transcribe_chord_out, transcribe_status],
             )
 
+    gr.Markdown(
+        "<div style='text-align:center;color:#9ca3af;font-size:0.82em;margin:22px 0 6px;'>"
+        "🌿 PitchPal 是 EMMARK 作品集中的一個專案 · "
+        "<a href='https://windsjp00171-star.github.io/CLAUDE-DESIGN/' target='_blank' style='color:#f5a623;text-decoration:none;'>查看更多作品 →</a>"
+        "</div>"
+    )
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 7860))
     demo.launch(server_name="0.0.0.0", server_port=port)
