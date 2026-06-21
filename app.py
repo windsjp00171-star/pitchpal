@@ -1890,5 +1890,13 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 7860))
-    demo.launch(server_name="0.0.0.0", server_port=port)
+    # ssr_mode=False：避免 gradio 5.x 在 slim 鏡像（無完整 Node 環境）啟動時
+    #   卡在 SSR 子程序、不報錯也印不出 "Running on local URL"。
+    # show_api=False：跳過容易出問題的 API schema 產生步驟（本工具用不到）。
+    demo.launch(
+        server_name="0.0.0.0",
+        server_port=port,
+        ssr_mode=False,
+        show_api=False,
+    )
 
