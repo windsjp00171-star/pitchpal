@@ -349,6 +349,16 @@ def detect_key(audio_path: str):
     return key_str, confidence
 
 
+def detect_bpm(audio_path: str) -> int:
+    y, sr = librosa.load(audio_path, mono=True)
+    if len(y) == 0:
+        raise ValueError("音頻檔案為空或無法讀取。")
+
+    y, _ = librosa.effects.trim(y, top_db=20)
+    tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
+    return int(round(float(np.atleast_1d(tempo)[0])))
+
+
 def result_key(detected_key: str, steps: int) -> str:
     if not detected_key:
         return ""
@@ -394,13 +404,13 @@ def _conf_display(conf: int) -> str:
 def process_upload(file):
     try:
         if not file:
-            return "", "", "—", "", ""
+            return "", "", "—", "—", "", ""
         file_path = _resolve_path(file)
         print(f"[pitchpal] process_upload: type={type(file).__name__}, path={file_path!r}")
         if not file_path:
-            return "", "無法取得檔案路徑", "—", "", ""
+            return "", "無法取得檔案路徑", "—", "—", "", ""
         if not os.path.exists(file_path):
-            return "", f"檔案不存在：{file_path}", "—", "", ""
+            return "", f"檔案不存在：{file_path}", "—", "—", "", ""
 
         filename = os.path.basename(file_path)
         extracted = None
@@ -409,17 +419,18 @@ def process_upload(file):
             if needs_cleanup:
                 extracted = audio_path
             key, conf = detect_key(audio_path)
+            bpm = detect_bpm(audio_path)
         finally:
             if extracted and os.path.exists(extracted):
                 os.remove(extracted)
 
         rkey = result_key(key, 0)
         capo = capo_suggestions(rkey)
-        return filename, key, _conf_display(conf), rkey, capo
+        return filename, key, _conf_display(conf), f"{bpm} BPM", rkey, capo
     except Exception as e:
         msg = f"{type(e).__name__}: {e}"
         print(f"[pitchpal] process_upload error:\n{traceback.format_exc()}")
-        return "", msg, "—", "", ""
+        return "", msg, "—", "—", "", ""
 
 
 def on_slider_change(detected_key: str, steps: int):
@@ -1332,11 +1343,11 @@ def _yt_download_worker(url: str, opts: dict, result: list):
 
 def download_youtube(url: str, cookies_file: str | None = None):
     if not url or not url.strip():
-        return None, "", "—", "—", "", "", "請輸入 YouTube 連結。"
+        return None, "", "—", "—", "—", "", "", "請輸入 YouTube 連結。"
     try:
         import yt_dlp  # noqa: F401
     except ImportError:
-        return None, "", "—", "—", "", "", "yt-dlp 未安裝，請聯絡管理員。"
+        return None, "", "—", "—", "—", "", "", "yt-dlp 未安裝，請聯絡管理員。"
 
     tmpdir = tempfile.mkdtemp()
     out_template = os.path.join(tmpdir, "%(id)s.%(ext)s")
@@ -1400,12 +1411,12 @@ def download_youtube(url: str, cookies_file: str | None = None):
                 tip = "連線超時，YouTube 在雲端伺服器上有封鎖，建議直接上傳音檔。"
             else:
                 tip = f"所有方式均失敗：{msg[:120]}"
-            return None, "", "—", "—", "", "", f"❌ {tip}"
+            return None, "", "—", "—", "—", "", "", f"❌ {tip}"
 
         title = info.get("title", "（未知）")
         duration = info.get("duration", 0)
         if duration and duration > 900:
-            return None, "", "—", "—", "", "", f"影片超過 15 分鐘（{duration//60} 分），請改用較短片段。"
+            return None, "", "—", "—", "—", "", "", f"影片超過 15 分鐘（{duration//60} 分），請改用較短片段。"
 
         audio_path = None
         for f in os.listdir(tmpdir):
@@ -1413,17 +1424,18 @@ def download_youtube(url: str, cookies_file: str | None = None):
                 audio_path = os.path.join(tmpdir, f)
                 break
         if not audio_path:
-            return None, "", "—", "—", "", "", "音頻擷取失敗，請確認影片包含音軌。"
+            return None, "", "—", "—", "—", "", "", "音頻擷取失敗，請確認影片包含音軌。"
 
         _reg_tmp(audio_path)
         key, conf = detect_key(audio_path)
+        bpm = detect_bpm(audio_path)
         rkey = result_key(key, 0)
         capo = capo_suggestions(rkey)
-        return audio_path, title, key, _conf_display(conf), rkey, capo, f"✅ 完成：《{title}》｜偵測調性：{key}"
+        return audio_path, title, key, _conf_display(conf), f"{bpm} BPM", rkey, capo, f"✅ 完成：《{title}》｜偵測調性：{key}"
 
     except Exception as e:
         print(f"[pitchpal] download_youtube error:\n{traceback.format_exc()}")
-        return None, "", "—", "—", "", "", f"下載失敗：{e}"
+        return None, "", "—", "—", "—", "", "", f"下載失敗：{e}"
     finally:
         if info is None:
             shutil.rmtree(tmpdir, ignore_errors=True)
@@ -1508,6 +1520,12 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                             value="—",
                             scale=1,
                         )
+                        bpm_box = gr.Textbox(
+                            label="BPM（自動偵測）",
+                            interactive=False,
+                            value="—",
+                            scale=2,
+                        )
                     key_override = gr.Dropdown(
                         label="手動修正原 Key（偵測有誤時使用）",
                         choices=["（使用自動偵測）"] + ALL_KEYS,
@@ -1573,7 +1591,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                 fn=download_youtube,
                 inputs=[yt_url_box, yt_cookies_file],
                 outputs=[audio_input, filename_box, detected_key_box, confidence_box,
-                         result_key_box, capo_box, yt_status_box],
+                         bpm_box, result_key_box, capo_box, yt_status_box],
                 api_name="download_youtube",
                 show_progress="minimal",
             )
@@ -1581,7 +1599,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                 fn=process_upload,
                 inputs=[audio_input],
                 outputs=[filename_box, detected_key_box, confidence_box,
-                         result_key_box, capo_box],
+                         bpm_box, result_key_box, capo_box],
                 api_name="process_upload",
                 show_progress="minimal",
             )
