@@ -1916,5 +1916,6 @@ if __name__ == "__main__":
         server_port=port,
         ssr_mode=False,
         show_api=False,
+        analytics_enabled=False,
     )
 

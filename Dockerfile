@@ -7,7 +7,8 @@ WORKDIR /app
 # 即時輸出 log（否則 "Running on local URL" 等 stdout 訊息會被緩衝看不到）
 # 並關閉 gradio 5.x 預設 SSR（slim 鏡像無 Node 環境會啟動卡死）
 ENV PYTHONUNBUFFERED=1 \
-    GRADIO_SSR_MODE=False
+    GRADIO_SSR_MODE=False \
+    GRADIO_ANALYTICS_ENABLED=False
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
