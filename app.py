@@ -123,7 +123,7 @@ FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None
 
 VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 FFMPEG_CONVERT_EXTS = {".opus", ".ogg", ".webm", ".aac", ".wma", ".flac"}
-MAX_AUDIO_MB = 50
+MAX_AUDIO_MB = 100
 MAX_VIDEO_MB = 200
 MAX_DURATION_SEC = 600  # 10 minutes
 
@@ -1467,7 +1467,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                         show_label=False,
                     )
                     gr.Markdown(
-                        "<small>支援 MP3、WAV、M4A、FLAC、MP4、MKV｜音頻 50 MB / 影片 200 MB / 10 分鐘以內</small>",
+                        "<small>支援 MP3、WAV、M4A、FLAC、MP4、MKV｜音頻 100 MB / 影片 200 MB / 10 分鐘以內</small>",
                     )
                     with gr.Accordion("🔗 YouTube 連結（實驗性）", open=False):
                         gr.Markdown(
