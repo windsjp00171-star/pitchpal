@@ -21,6 +21,7 @@ import subprocess
 import tempfile
 import traceback
 import os
+import sys
 import shutil
 import threading
 import base64
@@ -118,8 +119,19 @@ KEY_DISPLAY = {
     "A#": "A#/Bb",
 }
 
+def _find_ffmpeg() -> str | None:
+    """本機/打包執行時，優先找執行檔旁邊的 ffmpeg(.exe)，找不到再找系統 PATH。"""
+    exe_dir = os.path.dirname(sys.executable if getattr(sys, "frozen", False) else os.path.abspath(__file__))
+    for name in ("ffmpeg.exe", "ffmpeg"):
+        candidate = os.path.join(exe_dir, name)
+        if os.path.isfile(candidate):
+            return candidate
+    return shutil.which("ffmpeg")
+
+
 OUTPUT_FORMATS = ["WAV", "MP3"]
-FFMPEG_AVAILABLE = shutil.which("ffmpeg") is not None
+FFMPEG_PATH = _find_ffmpeg()
+FFMPEG_AVAILABLE = FFMPEG_PATH is not None
 
 VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 FFMPEG_CONVERT_EXTS = {".opus", ".ogg", ".webm", ".aac", ".wma", ".flac"}
@@ -232,7 +244,7 @@ def _extract_audio_from_video(video_path: str) -> str:
     fd, wav_path = tempfile.mkstemp(suffix=".wav")
     os.close(fd)
     result = subprocess.run(
-        ["ffmpeg", "-i", video_path, "-vn", "-acodec", "pcm_s16le",
+        [FFMPEG_PATH, "-i", video_path, "-vn", "-acodec", "pcm_s16le",
          "-ar", "44100", "-ac", "2", wav_path, "-y"],
         capture_output=True,
     )
@@ -458,7 +470,7 @@ def _convert_to_mp3(wav_path: str, stem: str = "audio") -> str:
     fd, out_path = tempfile.mkstemp(suffix=f"__{stem}.mp3")
     os.close(fd)
     subprocess.run(
-        ["ffmpeg", "-i", wav_path, "-q:a", "2", out_path, "-y"],
+        [FFMPEG_PATH, "-i", wav_path, "-q:a", "2", out_path, "-y"],
         capture_output=True, check=True,
     )
     return _reg_tmp(out_path)
@@ -1356,6 +1368,7 @@ def download_youtube(url: str, cookies_file: str | None = None):
         "format": "bestaudio[ext=m4a]/bestaudio/best",
         "outtmpl": out_template,
         "postprocessors": [{"key": "FFmpegExtractAudio", "preferredcodec": "wav"}],
+        "ffmpeg_location": FFMPEG_PATH,
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,

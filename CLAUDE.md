@@ -15,6 +15,8 @@ pip install -r requirements.txt
 python app.py
 ```
 
+打包成 Windows 獨立 EXE：Windows 上執行 `build_exe.bat`（詳見 README.md）。
+
 ## 專案結構
 ```
 pitchpal/
