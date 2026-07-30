@@ -34,3 +34,11 @@ pitchpal/
 - 保持簡單，不要過度設計
 - 介面語言：繁體中文
 - 本機執行為主，未來考慮部署到 Hugging Face Spaces
+
+## 跨專案總覽
+
+12 個專案的清冊（用途、部署平台、正式網址、共通地雷）在 **CLAUDE-DESIGN** repo 的
+`PROJECTS.md`：https://github.com/windsjp00171-star/CLAUDE-DESIGN/blob/main/PROJECTS.md
+
+需要「其他專案跑在哪、網址是什麼」時去查那份，不要憑印象。
+換部署平台或網址時記得回去更新它。
