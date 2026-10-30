@@ -177,18 +177,16 @@ def analyze_audio(audio_path: str) -> tuple[str, str, str]:
     duration = librosa.get_duration(path=audio_path)
     if duration > MAX_DURATION_SEC:
         raise ValueError(f"音頻長度 {duration/60:.1f} 分鐘，超過上限 {MAX_DURATION_SEC//60} 分鐘。")
-    key = analysis.detect_key(audio_path)
+    key, bpm = analysis.analyze(audio_path)
     notes = [f"調性把握：{_conf_level(key.confidence)}"]
     if key.confidence < 70:
         hint = "、".join(dict.fromkeys(analysis.key_label(r, m) for r, m in key.alternatives))
         notes.append(f"也可能是 {hint}")
-    try:
-        bpm = analysis.detect_bpm(audio_path)
+    bpm_text = "—"
+    if bpm:
         bpm_text = f"{bpm.bpm} BPM"
         if bpm.alternatives:
             notes.append("速度也可能是 " + " / ".join(str(b) for b in bpm.alternatives) + " BPM")
-    except ValueError:
-        bpm_text = "—"
     return key.name, "；".join(notes), bpm_text
 
 
@@ -710,6 +708,7 @@ with gr.Blocks(title="PitchPal", css=CSS, theme=THEME, js=FORCE_LIGHT_JS) as dem
                 show_label=False,
                 editable=False,
                 elem_id="pp-upload",
+                elem_classes="pp-upload",
             )
             with gr.Row(equal_height=False, elem_classes="pp-cols"):
 
@@ -1128,6 +1127,7 @@ with gr.Blocks(title="PitchPal", css=CSS, theme=THEME, js=FORCE_LIGHT_JS) as dem
                 with gr.Column():
                     transcribe_audio_input = gr.Audio(
                         label="上傳音頻", type="filepath", sources=["upload"],
+                        elem_classes="pp-upload",
                     )
                     transcribe_key = gr.Dropdown(
                         label="調性（歌曲的 Key）", choices=MELODY_KEYS, value="G",

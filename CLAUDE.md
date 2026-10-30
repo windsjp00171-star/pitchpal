@@ -33,7 +33,7 @@ pitchpal/
 ```
 
 ## 核心邏輯
-- `analysis.detect_key` / `detect_bpm` — 和聲成分 + 調音校正 + Temperley 輪廓；信心度為第一名與第二名的差距，並回報「也可能是」候選。BPM 以打擊成分自相關並列出半速/倍速。
+- `analysis.detect_key` / `detect_bpm` — 和聲成分 + 調音校正（偏差 ≥1/6 半音才套用）+ Krumhansl–Schmuckler 輪廓（色度圖從 C2 起）；信心度為第一名與第二名的差距，並回報「也可能是」候選。BPM 以打擊成分自相關並列出半速/倍速。
 - `app.analyze_audio` — 組成介面顯示文字（調性、可信度、BPM）。
 - 調性文字格式（如「C#/Db 大調」）被移調與 Capo 邏輯解析，不可改。
 
