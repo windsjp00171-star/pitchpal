@@ -29,12 +29,13 @@ import base64
 import time
 
 import analysis
+from fretboard import capo_html
 from keyboard import keyboard_html
 from keys import ALL_KEYS, GUITAR_KEYS, KEY_DISPLAY, MAJOR_KEYS, MINOR_KEYS, NOTE_MAP
 from synth import (
     JIANPU_INTERVALS, MELODY_KEY_ROOTS, MELODY_KEYS, TIMBRE_CUTOFF, _RNG,
     _apply_quality_mod, _lowpass, _tone, _write_normalized,
-    get_diatonic_chords, parse_and_synth, play_chord_audio,
+    click_audio, get_diatonic_chords, parse_and_synth, play_chord_audio, scale_audio,
 )
 from theme import ACCENT, CSS, FORCE_LIGHT_JS, INK, MASTHEAD, THEME
 from tmpfiles import _reg_tmp
@@ -723,12 +724,14 @@ with gr.Blocks(title="PitchPal", css=CSS, theme=THEME, js=FORCE_LIGHT_JS) as dem
                         elem_classes="pp-big pp-key",
                     )
                     orig_keyboard = gr.HTML(keyboard_html("", INK, "原曲的音階"))
+                    play_orig_btn = gr.Button("聽原曲的音階", variant="secondary")
                     bpm_box = gr.Textbox(
                         label="速度 BPM（自動偵測）",
                         interactive=False,
                         value="—",
                         elem_classes="pp-big pp-bpm",
                     )
+                    click_btn = gr.Button("聽節拍（用偵測到的速度）", variant="secondary")
                     confidence_box = gr.Textbox(
                         label="辨識把握度與提醒",
                         interactive=False,
@@ -772,13 +775,14 @@ with gr.Blocks(title="PitchPal", css=CSS, theme=THEME, js=FORCE_LIGHT_JS) as dem
                         elem_classes="pp-big pp-key pp-key-target",
                     )
                     target_keyboard = gr.HTML(keyboard_html("", ACCENT, "要唱的音階"))
+                    play_target_btn = gr.Button("聽要唱的音階", variant="secondary")
                     steps_slider = gr.Slider(
                         label="移調半音數（往左降調，往右升調）",
                         minimum=-12, maximum=12, step=1, value=0,
                     )
                     with gr.Row():
-                        step_down_btn = gr.Button("降 1 個半音", variant="secondary")
-                        step_up_btn = gr.Button("升 1 個半音", variant="secondary")
+                        step_down_btn = gr.Button("降 1 個半音", variant="secondary", elem_classes="pp-key-white")
+                        step_up_btn = gr.Button("升 1 個半音", variant="secondary", elem_classes="pp-key-black")
                     capo_box = gr.Textbox(
                         label="吉他 Capo 建議",
                         interactive=False,
@@ -786,6 +790,7 @@ with gr.Blocks(title="PitchPal", css=CSS, theme=THEME, js=FORCE_LIGHT_JS) as dem
                         elem_id="capo-box",
                         elem_classes="pp-big pp-capo",
                     )
+                    capo_diagram = gr.HTML("")
                     output_fmt_radio = gr.Radio(
                         label="輸出格式",
                         choices=OUTPUT_FORMATS,
@@ -799,6 +804,10 @@ with gr.Blocks(title="PitchPal", css=CSS, theme=THEME, js=FORCE_LIGHT_JS) as dem
                     )
                     audio_output = gr.Audio(label="移調後音頻", type="filepath")
 
+            preview_player = gr.Audio(
+                label="試聽（節拍與音階會在這裡播放）", type="filepath", interactive=False,
+                autoplay=True, elem_classes="pp-preview",
+            )
             gr.Markdown(
                 "支援 MP3、WAV、M4A、FLAC、MP4、MKV。音頻 100 MB、影片 200 MB、10 分鐘以內。",
                 elem_classes="pp-hint",
@@ -837,6 +846,13 @@ with gr.Blocks(title="PitchPal", css=CSS, theme=THEME, js=FORCE_LIGHT_JS) as dem
 
             detected_key_box.change(lambda k: keyboard_html(k, INK, "原曲的音階"), detected_key_box, orig_keyboard, show_progress="hidden")
             result_key_box.change(lambda k: keyboard_html(k, ACCENT, "要唱的音階"), result_key_box, target_keyboard, show_progress="hidden")
+            capo_box.change(capo_html, capo_box, capo_diagram, show_progress="hidden")
+            play_orig_btn.click(scale_audio, detected_key_box, preview_player, show_progress="hidden")
+            play_target_btn.click(scale_audio, result_key_box, preview_player, show_progress="hidden")
+            click_btn.click(
+                lambda t: click_audio(int(re.search(r"\d+", t or "").group()) if re.search(r"\d+", t or "") else 0),
+                bpm_box, preview_player, show_progress="hidden",
+            )
             step_down_btn.click(lambda v: max(-12, int(v) - 1), steps_slider, steps_slider, show_progress="hidden")
             step_up_btn.click(lambda v: min(12, int(v) + 1), steps_slider, steps_slider, show_progress="hidden")
 

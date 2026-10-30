@@ -26,6 +26,9 @@ pitchpal/
 ├── transcribe.py   # 音頻轉譜（實驗）
 ├── keys.py         # 音名與調性常數
 ├── tmpfiles.py     # 暫存檔登記與清理
+├── keyboard.py     # 琴鍵音階圖（含五線譜）
+├── notation.py     # 五線譜、調號 SVG（Bravura 輪廓）
+├── fretboard.py    # Capo 指板圖
 ├── theme.py        # 視覺：Gradio 主題、CSS、字標（見 DESIGN.md）
 ├── tests/test_analysis.py
 ├── PRODUCT.md / DESIGN.md

@@ -477,3 +477,30 @@ def _apply_quality_mod(chord: str, mod: str) -> str:
     return chord
 
 
+
+
+# ── 介面用的短音檔：聽節拍、聽音階 ─────────────────────────────────────────────
+
+def click_audio(bpm: int, beats: int = 8) -> str | None:
+    """以偵測到的 BPM 打節拍（每 4 拍一個重音），讓人聽出速度對不對。"""
+    if not bpm or bpm < 30 or bpm > 300:
+        return None
+    sr = 44100
+    total = int(sr * 60.0 / bpm * beats)
+    return _write_normalized(_click_track(total, bpm, sr, 4, 1.0), sr)
+
+
+def scale_audio(key_str: str) -> str | None:
+    """由主音開始往上唱一個八度的音階（大調／自然小調），讓人聽出這個調。"""
+    parts = (key_str or "").split()
+    if len(parts) < 2 or parts[0].split("/")[0] not in NOTE_MAP:
+        return None
+    root = NOTE_MAP[parts[0].split("/")[0]]
+    intervals = (0, 2, 4, 5, 7, 9, 11, 12) if parts[1] == "大調" else (0, 2, 3, 5, 7, 8, 10, 12)
+    base = 60 + root if root <= 6 else 48 + root      # 落在人聲與吉他舒適的範圍
+    sr = 44100
+    segs = []
+    for k, iv in enumerate(intervals):
+        dur = 0.6 if k < len(intervals) - 1 else 1.4
+        segs.append(_tone(440.0 * 2 ** ((base + iv - 69) / 12), dur, sr, "鋼琴", _RNG))
+    return _write_normalized(_lowpass(np.concatenate(segs).astype(np.float32), sr), sr)
