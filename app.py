@@ -21,6 +21,7 @@ import subprocess
 import tempfile
 import traceback
 import os
+import re
 import sys
 import shutil
 import threading
@@ -28,6 +29,8 @@ import base64
 import io
 import time
 import atexit
+
+import analysis
 from scipy.signal import butter, sosfilt, lfilter
 
 # ── Temp file cleanup ────────────────────────────────────────────────────────
@@ -282,10 +285,6 @@ def _prepare_audio(file_path: str) -> tuple[str, bool]:
     return file_path, False
 
 
-_KS_MAJOR = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09,
-                       2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
-_KS_MINOR = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53,
-                       2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
 _LOWPASS_SOS = butter(4, 8000.0 / (44100 / 2), btype="low", output="sos")
 
 TIMBRE_CUTOFF = {
@@ -299,76 +298,24 @@ TIMBRE_CUTOFF = {
 _RNG = np.random.default_rng()
 
 
-def _ks_scores(chroma_mean: np.ndarray) -> tuple[list, list]:
-    major = [np.corrcoef(np.roll(_KS_MAJOR, i), chroma_mean)[0, 1] for i in range(12)]
-    minor = [np.corrcoef(np.roll(_KS_MINOR, i), chroma_mean)[0, 1] for i in range(12)]
-    return major, minor
-
-
-def detect_key(audio_path: str):
-    y, sr = librosa.load(audio_path, mono=True)
-    if len(y) == 0:
-        raise ValueError("音頻檔案為空或無法讀取。")
-
-    duration = len(y) / sr
+def analyze_audio(audio_path: str) -> tuple[str, str, str]:
+    """偵測調性與 BPM，回傳 (調性, 信心度文字, BPM 文字) 供介面直接顯示。"""
+    duration = librosa.get_duration(path=audio_path)
     if duration > MAX_DURATION_SEC:
         raise ValueError(f"音頻長度 {duration/60:.1f} 分鐘，超過上限 {MAX_DURATION_SEC//60} 分鐘。")
-
-    # 1. 裁掉首尾靜音
-    y, _ = librosa.effects.trim(y, top_db=20)
-
-    # 2. 跳過前後各 10%，分析中間 80%（避免前奏/尾奏干擾）
-    n = len(y)
-    margin = int(n * 0.10)
-    y_core = y[margin: n - margin] if n - 2 * margin > sr else y
-
-    # 3. 多窗口投票：把核心段切成 4 塊，各自算 KS，再平均
-    segments = np.array_split(y_core, 4)
-    all_major = np.zeros(12)
-    all_minor = np.zeros(12)
-    for seg in segments:
-        if len(seg) < sr // 4:
-            continue
-        # chroma_cens 比 chroma_cqt 更抗雜訊
-        chroma = librosa.feature.chroma_cens(y=seg, sr=sr)
-        cm = chroma.mean(axis=1)
-        maj, minor = _ks_scores(cm)
-        all_major += np.array(maj)
-        all_minor += np.array(minor)
-
-    best_major_idx = int(np.argmax(all_major))
-    best_minor_idx = int(np.argmax(all_minor))
-    best_major_score = all_major[best_major_idx]
-    best_minor_score = all_minor[best_minor_idx]
-
-    if best_major_score >= best_minor_score:
-        root = MAJOR_KEYS[best_major_idx]
-        best_score = best_major_score
-        mode = "大調"
-    else:
-        root = MINOR_KEYS[best_minor_idx]
-        best_score = best_minor_score
-        mode = "小調"
-
-    display = KEY_DISPLAY.get(root, root)
-    key_str = f"{display} {mode}"
-
-    all_scores = list(all_major) + list(all_minor)
-    others = [s for s in all_scores if s != best_score]
-    margin_score = best_score - float(np.mean(others))
-    confidence = int(min(100, max(0, margin_score / (0.35 * 4) * 100)))
-
-    return key_str, confidence
-
-
-def detect_bpm(audio_path: str) -> int:
-    y, sr = librosa.load(audio_path, mono=True)
-    if len(y) == 0:
-        raise ValueError("音頻檔案為空或無法讀取。")
-
-    y, _ = librosa.effects.trim(y, top_db=20)
-    tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
-    return int(round(float(np.atleast_1d(tempo)[0])))
+    key = analysis.detect_key(audio_path)
+    conf_text = _conf_display(key.confidence)
+    hint = "、".join(dict.fromkeys(analysis.key_label(r, m) for r, m in key.alternatives))
+    if key.confidence < 70 and hint:
+        conf_text += f"｜也可能是：{hint}"
+    try:
+        bpm = analysis.detect_bpm(audio_path)
+        bpm_text = f"{bpm.bpm} BPM"
+        if bpm.alternatives:
+            bpm_text += "（也可能是 " + " / ".join(str(b) for b in bpm.alternatives) + "）"
+    except ValueError:
+        bpm_text = "—"
+    return key.name, conf_text, bpm_text
 
 
 def result_key(detected_key: str, steps: int) -> str:
@@ -430,15 +377,14 @@ def process_upload(file):
             audio_path, needs_cleanup = _prepare_audio(file_path)
             if needs_cleanup:
                 extracted = audio_path
-            key, conf = detect_key(audio_path)
-            bpm = detect_bpm(audio_path)
+            key, conf_text, bpm_text = analyze_audio(audio_path)
         finally:
             if extracted and os.path.exists(extracted):
                 os.remove(extracted)
 
         rkey = result_key(key, 0)
         capo = capo_suggestions(rkey)
-        return filename, key, _conf_display(conf), f"{bpm} BPM", rkey, capo
+        return filename, key, conf_text, bpm_text, rkey, capo
     except Exception as e:
         msg = f"{type(e).__name__}: {e}"
         print(f"[pitchpal] process_upload error:\n{traceback.format_exc()}")
@@ -976,10 +922,8 @@ def _submit_feedback(file, detected, conf_str, corrected, notes):
     if file:
         p = _resolve_path(file)
         filename = os.path.basename(p) if p else ""
-    try:
-        conf = int("".join(c for c in conf_str if c.isdigit()))
-    except ValueError:
-        conf = None
+    m = re.search(r"(\d+)%", conf_str or "")
+    conf = int(m.group(1)) if m else None
     return submit_feedback(filename, detected, corrected, conf, notes)
 
 
@@ -1440,11 +1384,10 @@ def download_youtube(url: str, cookies_file: str | None = None):
             return None, "", "—", "—", "—", "", "", "音頻擷取失敗，請確認影片包含音軌。"
 
         _reg_tmp(audio_path)
-        key, conf = detect_key(audio_path)
-        bpm = detect_bpm(audio_path)
+        key, conf_text, bpm_text = analyze_audio(audio_path)
         rkey = result_key(key, 0)
         capo = capo_suggestions(rkey)
-        return audio_path, title, key, _conf_display(conf), f"{bpm} BPM", rkey, capo, f"✅ 完成：《{title}》｜偵測調性：{key}"
+        return audio_path, title, key, conf_text, bpm_text, rkey, capo, f"✅ 完成：《{title}》｜偵測調性：{key}"
 
     except Exception as e:
         print(f"[pitchpal] download_youtube error:\n{traceback.format_exc()}")
