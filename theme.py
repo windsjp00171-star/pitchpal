@@ -111,6 +111,22 @@ input[type="number"] { font-size: 1.1rem !important; font-weight: 700 !important
 .pp-kb-cap { font-size: 0.95rem; font-weight: 700; color: var(--muted); margin-bottom: 6px; }
 .pp-kb-svg { display: block; width: 100%; height: auto; max-width: 440px; }
 
+/* 五線譜 */
+.pp-staff-svg { display: block; max-width: 100%; height: auto; margin: 0 0 6px; }
+
+/* 吉他指板 */
+.pp-frets { display: flex; flex-wrap: wrap; gap: 14px 18px; padding: 4px 2px 2px; }
+.pp-fret { margin: 0; width: 132px; }
+.pp-fret svg { display: block; width: 100%; height: auto; }
+.pp-fret figcaption { text-align: center; font-size: 0.95rem; line-height: 1.35; margin-top: 2px; }
+
+/* 樂器語彙：降／升半音像一白一黑的琴鍵；分頁以小節線分隔 */
+button.pp-key-white { background: #fff !important; border-radius: 0 0 12px 12px !important; border-width: 2px !important; min-height: 64px !important; }
+button.pp-key-black { background: var(--ink) !important; color: #fff !important; border-radius: 0 0 10px 10px !important; border: 2px solid var(--ink) !important; min-height: 64px !important; }
+button.pp-key-black:hover { background: #3a342d !important; }
+button[role="tab"] + button[role="tab"] { border-left: 2px solid var(--ink) !important; margin-left: 4px; }
+.pp-preview { margin-top: 10px; }
+
 /* 單選群組：橫向排列、等寬按鈕 */
 .gradio-container .wrap[role="radiogroup"], .gradio-container fieldset .wrap, .gradio-container .block:has(input[type="radio"]) .wrap { display: flex !important; flex-wrap: wrap; gap: 8px; }
 .gradio-container .block:has(input[type="radio"]) label { min-width: 84px; justify-content: center; text-align: center; }

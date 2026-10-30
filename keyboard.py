@@ -1,5 +1,6 @@
 """把「某個調」畫成一個八度的琴鍵：音階內的音塗色，主音實心。"""
 from keys import NOTE_MAP
+from notation import staff_svg
 
 _MAJOR = (0, 2, 4, 5, 7, 9, 11)
 _MINOR = (0, 2, 3, 5, 7, 8, 10)          # 自然小調
@@ -76,4 +77,5 @@ def keyboard_html(key_str: str, color: str, caption: str) -> str:
         f'aria-label="{caption}">' + "".join(keys) + "".join(labels) + "".join(blacks) + "</svg>"
     )
     cap = f"{caption}" + (f"：{_signature(root, mode)}" if parsed else "")
-    return f'<div class="pp-kb"><div class="pp-kb-cap">{cap}</div>{svg}</div>'
+    staff = staff_svg(root, mode, color) if parsed else ""
+    return f'<div class="pp-kb"><div class="pp-kb-cap">{cap}</div>{staff}{svg}</div>'
