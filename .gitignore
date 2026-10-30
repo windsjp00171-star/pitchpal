@@ -6,8 +6,6 @@ __pycache__/
 *.egg-info/
 build/
 dist/
-frontend/node_modules/
-frontend/dist/
 *.wav
 *.mp3
 *.mp4
