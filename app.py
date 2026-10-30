@@ -37,7 +37,7 @@ from synth import (
     _apply_quality_mod, _lowpass, _tone, _write_normalized,
     click_audio, get_diatonic_chords, parse_and_synth, play_chord_audio, scale_audio,
 )
-from theme import ACCENT, CSS, FORCE_LIGHT_JS, INK, MASTHEAD, THEME
+from theme import ACCENT, CSS, FORCE_LIGHT_JS, INK, MASTHEAD, PLAY_JS, THEME
 from tmpfiles import _reg_tmp
 from transcribe import transcribe_audio
 
@@ -806,7 +806,7 @@ with gr.Blocks(title="PitchPal", css=CSS, theme=THEME, js=FORCE_LIGHT_JS) as dem
 
             preview_player = gr.Audio(
                 label="試聽（節拍與音階會在這裡播放）", type="filepath", interactive=False,
-                autoplay=True, elem_classes="pp-preview",
+                autoplay=False, elem_classes="pp-preview",
             )
             gr.Markdown(
                 "支援 MP3、WAV、M4A、FLAC、MP4、MKV。音頻 100 MB、影片 200 MB、10 分鐘以內。",
@@ -847,12 +847,12 @@ with gr.Blocks(title="PitchPal", css=CSS, theme=THEME, js=FORCE_LIGHT_JS) as dem
             detected_key_box.change(lambda k: keyboard_html(k, INK, "原曲的音階"), detected_key_box, orig_keyboard, show_progress="hidden")
             result_key_box.change(lambda k: keyboard_html(k, ACCENT, "要唱的音階"), result_key_box, target_keyboard, show_progress="hidden")
             capo_box.change(capo_html, capo_box, capo_diagram, show_progress="hidden")
-            play_orig_btn.click(scale_audio, detected_key_box, preview_player, show_progress="hidden")
-            play_target_btn.click(scale_audio, result_key_box, preview_player, show_progress="hidden")
+            play_orig_btn.click(scale_audio, detected_key_box, preview_player, show_progress="hidden").then(fn=None, inputs=[preview_player], js=PLAY_JS)
+            play_target_btn.click(scale_audio, result_key_box, preview_player, show_progress="hidden").then(fn=None, inputs=[preview_player], js=PLAY_JS)
             click_btn.click(
                 lambda t: click_audio(int(re.search(r"\d+", t or "").group()) if re.search(r"\d+", t or "") else 0),
                 bpm_box, preview_player, show_progress="hidden",
-            )
+            ).then(fn=None, inputs=[preview_player], js=PLAY_JS)
             step_down_btn.click(lambda v: max(-12, int(v) - 1), steps_slider, steps_slider, show_progress="hidden")
             step_up_btn.click(lambda v: min(12, int(v) + 1), steps_slider, steps_slider, show_progress="hidden")
 
@@ -920,7 +920,7 @@ with gr.Blocks(title="PitchPal", css=CSS, theme=THEME, js=FORCE_LIGHT_JS) as dem
                 # ── 旋律欄 ────────────────────────────────────────────────
                 with gr.Column(scale=5):
                     gr.Markdown("旋律", elem_classes="section-header")
-                    note_preview = gr.Audio(label="試音", autoplay=True, visible=True)
+                    note_preview = gr.Audio(label="試音", autoplay=False, visible=True)
                     with gr.Row():
                         note_mode = gr.Radio(
                             choices=["只試音", "加入輸入框"], value="只試音",
@@ -960,7 +960,7 @@ with gr.Blocks(title="PitchPal", css=CSS, theme=THEME, js=FORCE_LIGHT_JS) as dem
                 # ── 和弦欄 ────────────────────────────────────────────────
                 with gr.Column(scale=5):
                     gr.Markdown("和弦", elem_classes="section-header")
-                    chord_preview = gr.Audio(label="試音", autoplay=True, visible=True)
+                    chord_preview = gr.Audio(label="試音", autoplay=False, visible=True)
                     with gr.Row():
                         chord_mode = gr.Radio(
                             choices=["只試音", "加入輸入框"], value="只試音",
@@ -1062,7 +1062,7 @@ with gr.Blocks(title="PitchPal", css=CSS, theme=THEME, js=FORCE_LIGHT_JS) as dem
                     fn=on_chord_palette_btn,
                     inputs=[_btn, chord_input, chord_mode, chord_quality_state],
                     outputs=[chord_preview, chord_input],
-                )
+                ).then(fn=None, inputs=[chord_preview], js=PLAY_JS)
 
             barline_btn.click(
                 fn=add_barline_to_input,
@@ -1114,7 +1114,7 @@ with gr.Blocks(title="PitchPal", css=CSS, theme=THEME, js=FORCE_LIGHT_JS) as dem
                     inputs=[melody_input, note_mode, melody_key,
                             melody_octave, melody_timbre, mod_state],
                     outputs=[note_preview, melody_input],
-                )
+                ).then(fn=None, inputs=[note_preview], js=PLAY_JS)
 
             # Direct-append modifiers
             mod_eighth.click(

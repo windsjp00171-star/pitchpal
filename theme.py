@@ -44,20 +44,21 @@ FORCE_LIGHT_JS = """() => {
       if (zh[k]) n.nodeValue = zh[k];
     }
   };
-  // Gradio 5.9 的 Audio 元件在自動播放時會對同一個播放器連呼叫兩次 play()，
-  // 聽起來就是「點一下響兩次」。同一個播放器 0.5 秒內的重複請求直接忽略。
-  const nativePlay = HTMLMediaElement.prototype.play;
-  HTMLMediaElement.prototype.play = function () {
-    const now = Date.now();
-    if (this.__ppLastPlay && now - this.__ppLastPlay < 500) return Promise.resolve();
-    this.__ppLastPlay = now;
-    return nativePlay.apply(this, arguments);
-  };
   light(); localize();
   new MutationObserver(localize).observe(document.body, { childList: true, subtree: true });
   const opts = { attributes: true, attributeFilter: ['class'] };
   new MutationObserver(light).observe(document.body, opts);
   new MutationObserver(light).observe(document.documentElement, opts);
+}"""
+
+# 結果回來後自己播一次。不用 Gradio 內建的 autoplay：它在不同瀏覽器上會對同一個聲音播兩次。
+PLAY_JS = """(a) => {
+  const url = a && (a.url || a.path);
+  if (!url) return;
+  if (window.__ppAudio) { try { window.__ppAudio.pause(); } catch (e) {} }
+  const au = new Audio(url);
+  window.__ppAudio = au;
+  au.play().catch(() => {});
 }"""
 
 MASTHEAD = """
