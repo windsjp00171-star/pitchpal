@@ -7,21 +7,21 @@ colors:
   vermilion: "#C8321A"
   vermilion-deep: "#b02d17"
   muted-ink: "#57514a"
-  placeholder: "#8a837a"
+  placeholder: "#6b645c"
   selection: "#f4b8aa"
 typography:
   display-key:
     fontFamily: "Noto Sans TC, PingFang TC, Microsoft JhengHei, ui-sans-serif, system-ui, sans-serif"
-    fontSize: "2.8rem"
+    fontSize: "4.2rem"
     fontWeight: 900
     lineHeight: 1.2
   display-bpm:
     fontFamily: "Noto Sans TC, PingFang TC, Microsoft JhengHei, ui-sans-serif, system-ui, sans-serif"
-    fontSize: "2rem"
+    fontSize: "2.4rem"
     fontWeight: 800
   masthead:
     fontFamily: "Noto Sans TC, PingFang TC, Microsoft JhengHei, ui-sans-serif, system-ui, sans-serif"
-    fontSize: "2rem"
+    fontSize: "1.5rem"
     fontWeight: 900
     lineHeight: 1.1
   section:
@@ -89,7 +89,7 @@ components:
 - **Ink** (#16130f)：所有主要文字與粗分隔線。
 - **Paper** (#ffffff)：全部背景。
 - **Muted Ink** (#57514a)：欄位標籤與說明小字。
-- **Placeholder** (#8a837a)：未填的佔位文字。
+- **Placeholder** (#6b645c)：未填的佔位文字，對白底約 5.8:1。
 
 ### Named Rules
 **The One Red Rule.** 朱紅只出現在「今天要唱」的結果與動作上；原曲側一律墨黑。紅色的稀少就是它的意義。
@@ -99,20 +99,20 @@ components:
 **Font:** Noto Sans TC，後備 PingFang TC、微軟正黑體、系統無襯線字。單一字族，靠粗細與大小分層。
 
 ### Hierarchy
-- **Display Key** (900, 2.8rem（手機 2.4rem）, 1.2)：原曲與目標調性。
-- **Display BPM** (800, 2rem)：速度。
-- **Masthead** (900, 2rem)：字標 PitchPal。
+- **Display Key** (900, 4.2rem（手機 3.4rem）, 1.2)：原曲與目標調性。
+- **Display BPM** (800, 2.4rem)：速度。
+- **Masthead** (900, 1.5rem)：字標 PitchPal。
 - **Section** (800, 1.1rem)：「音源」「原曲」「今天要唱」。
 - **Body** (400, 17px)：一般文字、按鈕外的所有說明。
 - **Label** (700, 0.95rem, 中灰)：欄位標籤。
 - **Hint** (400, 0.9rem)：次要說明，不再小於 14px。
 
 ### Named Rules
-**The No-Tiny-Type Rule.** 任何可讀文字不小於 14px；核心結果不小於 2rem。
+**The No-Tiny-Type Rule.** 任何可讀文字不小於 14px；核心結果（調性、BPM）不小於 2.4rem。
 
 ## Layout
 
-單欄容器，最大寬 1040px。上方「音源」全寬；下方左右兩欄：左「原曲」、右「今天要唱」。768px 以下堆疊，左欄先、右欄後。欄與欄、區與區都用 2px 墨黑底線分隔，不用留白當唯一分隔。
+單欄容器，最大寬 1040px。上方「音源」全寬；下方左右兩欄：左「原曲」、右「今天要唱」。768px 以下堆疊，左欄先、右欄後。欄與欄、區與區都用 2px 墨黑底線分隔，不用留白當唯一分隔。兩欄之間（桌面）是一條粗細雙線，像小節線。結果列要在上傳後第一屏看得到：YouTube 與格式說明收在結果下方。
 
 ## Elevation & Depth
 
@@ -131,6 +131,9 @@ components:
 
 ### Result Fields
 - 無外框、透明底、只留 2px 墨黑底線；大字、字重 900。目標調性改為朱紅。可信度與提示用 1.05rem、600 的單行。
+
+### Accordions
+- 上下各 2px 墨黑線、最小高 48px，右側是繪製的箭頭（開啟時翻轉），不用預設三角形。
 
 ### Inputs
 - 上傳區：2px 墨黑虛線框，最小高 140px，提示文字已中文化。
