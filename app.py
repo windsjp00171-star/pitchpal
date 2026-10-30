@@ -26,50 +26,19 @@ import sys
 import shutil
 import threading
 import base64
-import io
 import time
-import atexit
 
 import analysis
-from scipy.signal import butter, sosfilt, lfilter
+from keys import ALL_KEYS, GUITAR_KEYS, KEY_DISPLAY, MAJOR_KEYS, MINOR_KEYS, NOTE_MAP
+from synth import (
+    JIANPU_INTERVALS, MELODY_KEY_ROOTS, MELODY_KEYS, TIMBRE_CUTOFF, _RNG,
+    _apply_quality_mod, _lowpass, _tone, _write_normalized,
+    get_diatonic_chords, parse_and_synth, play_chord_audio,
+)
+from theme import CSS, FORCE_LIGHT_JS, MASTHEAD, THEME
+from tmpfiles import _reg_tmp
+from transcribe import transcribe_audio
 
-# ── Temp file cleanup ────────────────────────────────────────────────────────
-_tmp_lock = threading.Lock()
-_tmp_paths: list[tuple[float, str]] = []   # (created_time, path)
-
-def _reg_tmp(path: str) -> str:
-    with _tmp_lock:
-        _tmp_paths.append((time.time(), path))
-    return path
-
-def _sweep_tmp(max_age: float = 7200.0):
-    cutoff = time.time() - max_age
-    with _tmp_lock:
-        survivors = []
-        for ts, p in _tmp_paths:
-            if ts < cutoff:
-                try: os.remove(p)
-                except OSError: pass
-            else:
-                survivors.append((ts, p))
-        _tmp_paths[:] = survivors
-
-@atexit.register
-def _cleanup_all_tmp():
-    with _tmp_lock:
-        for _, p in _tmp_paths:
-            try: os.remove(p)
-            except OSError: pass
-
-def _start_sweep_thread():
-    def _loop():
-        while True:
-            time.sleep(3600)
-            _sweep_tmp()
-    t = threading.Thread(target=_loop, daemon=True)
-    t.start()
-
-_start_sweep_thread()
 
 # ── Supabase 連線（讀環境變數，HF Spaces Secrets 設定）─────────────────────
 _sb_client = None
@@ -110,17 +79,6 @@ def submit_feedback(filename: str, detected: str, corrected: str,
     except Exception as e:
         return f"儲存失敗：{e}"
 
-MAJOR_KEYS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-MINOR_KEYS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-ALL_KEYS = [f"{k} 大調" for k in MAJOR_KEYS] + [f"{k} 小調" for k in MINOR_KEYS]
-
-KEY_DISPLAY = {
-    "C#": "C#/Db",
-    "D#": "D#/Eb",
-    "F#": "F#/Gb",
-    "G#": "G#/Ab",
-    "A#": "A#/Bb",
-}
 
 def _find_ffmpeg() -> str | None:
     """本機/打包執行時，優先找執行檔旁邊的 ffmpeg(.exe)，找不到再找系統 PATH。"""
@@ -142,80 +100,7 @@ MAX_AUDIO_MB = 100
 MAX_VIDEO_MB = 200
 MAX_DURATION_SEC = 600  # 10 minutes
 
-NOTE_MAP = {
-    "C": 0, "C#": 1, "Db": 1, "D": 2, "D#": 3, "Eb": 3,
-    "E": 4, "F": 5, "F#": 6, "Gb": 6, "G": 7, "G#": 8,
-    "Ab": 8, "A": 9, "A#": 10, "Bb": 10, "B": 11,
-}
 
-GUITAR_KEYS = [("C", 0), ("D", 2), ("E", 4), ("G", 7), ("A", 9)]
-
-CSS = """
-.gradio-container { max-width: 980px !important; margin: auto; }
-/* Section labels */
-.section-header {
-    font-size: 0.68em; font-weight: 800; letter-spacing: 0.12em;
-    text-transform: uppercase; color: #b07d1a;
-    margin-bottom: 4px !important; margin-top: 10px !important;
-    border-left: 3px solid #e6a817; padding-left: 8px;
-}
-/* Palette rows */
-.chord-palette button { min-width: 58px !important; font-size: 0.82em !important; padding: 6px 3px !important; }
-.note-palette button  { min-width: 42px !important; font-size: 0.9em  !important; padding: 6px 4px !important; font-weight: 700 !important; }
-.mod-palette button   { min-width: 50px !important; font-size: 0.78em !important; padding: 5px 3px !important; }
-/* Capo monospace */
-#capo-box textarea { font-family: monospace; font-size: 0.9em; }
-/* Tabs */
-.tab-nav button {
-    border: 1px solid #d1d5db !important;
-    border-radius: 8px 8px 0 0 !important;
-    margin-right: 3px !important;
-    box-shadow: 0 -1px 4px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04) !important;
-    transition: box-shadow 0.12s, background 0.12s !important;
-}
-.tab-nav button:hover {
-    box-shadow: 0 -2px 8px rgba(0,0,0,0.13), 0 1px 3px rgba(0,0,0,0.07) !important;
-    background: #f9f6f0 !important;
-}
-.tab-nav button.selected {
-    border-bottom-color: transparent !important;
-    border-top: 2px solid #e6a817 !important;
-    box-shadow: 0 -3px 10px rgba(230,168,23,0.18), 0 1px 0 #fff !important;
-    background: #fff !important;
-    font-weight: 700 !important;
-}
-/* Button shadows */
-button.lg, button.primary {
-    box-shadow: 0 3px 8px rgba(0,0,0,0.18), 0 1px 3px rgba(0,0,0,0.12) !important;
-    transition: box-shadow 0.12s, transform 0.1s !important;
-}
-button.lg:hover, button.primary:hover {
-    box-shadow: 0 5px 14px rgba(0,0,0,0.22), 0 2px 5px rgba(0,0,0,0.14) !important;
-    transform: translateY(-1px) !important;
-}
-button.lg:active, button.primary:active {
-    box-shadow: 0 1px 3px rgba(0,0,0,0.15) !important;
-    transform: translateY(1px) !important;
-}
-footer { display: none !important; }
-/* Mobile responsive */
-@media (max-width: 768px) {
-    .gradio-container { padding: 6px !important; }
-    /* Stack two-column rows vertically */
-    .gr-row { flex-wrap: wrap !important; }
-    .gr-row > .gr-column { min-width: 100% !important; flex: 1 1 100% !important; }
-    /* Palette buttons: wrap and shrink */
-    .chord-palette, .note-palette, .mod-palette {
-        flex-wrap: wrap !important;
-        gap: 4px !important;
-    }
-    .chord-palette button { min-width: 44px !important; flex: 1 1 auto !important; }
-    .note-palette button  { min-width: 36px !important; flex: 1 1 auto !important; }
-    .mod-palette button   { min-width: 52px !important; flex: 1 1 auto !important; }
-    /* Bigger touch targets */
-    button { min-height: 40px !important; }
-}
-"""
 
 
 def _key_semitone(key_str: str) -> int:
@@ -285,17 +170,6 @@ def _prepare_audio(file_path: str) -> tuple[str, bool]:
     return file_path, False
 
 
-_LOWPASS_SOS = butter(4, 8000.0 / (44100 / 2), btype="low", output="sos")
-
-TIMBRE_CUTOFF = {
-    "鋼琴": 7000.0,
-    "吉他": 9000.0,
-    "長笛": 5000.0,
-    "管風琴": 6000.0,
-    "豎琴": 10000.0,
-    "小提琴": 7500.0,
-}
-_RNG = np.random.default_rng()
 
 
 def analyze_audio(audio_path: str) -> tuple[str, str, str]:
@@ -307,12 +181,12 @@ def analyze_audio(audio_path: str) -> tuple[str, str, str]:
     conf_text = _conf_display(key.confidence)
     hint = "、".join(dict.fromkeys(analysis.key_label(r, m) for r, m in key.alternatives))
     if key.confidence < 70 and hint:
-        conf_text += f"｜也可能是：{hint}"
+        conf_text += f"｜調性也可能是：{hint}"
     try:
         bpm = analysis.detect_bpm(audio_path)
         bpm_text = f"{bpm.bpm} BPM"
         if bpm.alternatives:
-            bpm_text += "（也可能是 " + " / ".join(str(b) for b in bpm.alternatives) + "）"
+            conf_text += "｜速度也可能是 " + " / ".join(str(b) for b in bpm.alternatives)
     except ValueError:
         bpm_text = "—"
     return key.name, conf_text, bpm_text
@@ -353,11 +227,11 @@ def capo_suggestions(key_str: str) -> str:
 
 def _conf_display(conf: int) -> str:
     if conf >= 70:
-        return f"🟢 {conf}%"
+        return f"高 {conf}%"
     elif conf >= 40:
-        return f"🟡 {conf}%"
+        return f"中 {conf}%"
     else:
-        return f"🔴 {conf}%"
+        return f"低 {conf}%"
 
 
 def process_upload(file):
@@ -489,394 +363,6 @@ def transpose_audio(file, detected_key, steps, output_fmt, key_override="（使�
 
 # ── 簡譜合成 ──────────────────────────────────────────────────────────────────
 
-JIANPU_INTERVALS = {"1": 0, "2": 2, "3": 4, "4": 5, "5": 7, "6": 9, "7": 11}
-
-MELODY_KEY_ROOTS = {
-    "C": 60, "C#": 61, "D": 62, "D#": 63, "E": 64,
-    "F": 65, "F#": 66, "G": 67, "G#": 68, "A": 69, "A#": 70, "B": 71,
-}
-
-MELODY_KEYS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
-
-# Chord parsing — roots ordered longest-first to avoid C matching C# prefix
-_CHORD_ROOTS = [
-    ("C#", 1), ("Db", 1), ("D#", 3), ("Eb", 3), ("F#", 6), ("Gb", 6),
-    ("G#", 8), ("Ab", 8), ("A#", 10), ("Bb", 10),
-    ("C", 0), ("D", 2), ("E", 4), ("F", 5), ("G", 7), ("A", 9), ("B", 11),
-]
-# Intervals (semitones) for each chord quality suffix
-_CHORD_QUALITIES: dict[str, list[int]] = {
-    "maj7": [0, 4, 7, 11], "maj9": [0, 4, 7, 11, 14],
-    "M7":   [0, 4, 7, 11],
-    "m7b5": [0, 3, 6, 10], "ø":    [0, 3, 6, 10],
-    "add9": [0, 4, 7, 14], "add2": [0, 2, 4, 7],
-    "sus4": [0, 5, 7],     "sus2": [0, 2, 7], "sus": [0, 5, 7],
-    "dim7": [0, 3, 6, 9],  "dim":  [0, 3, 6],
-    "aug":  [0, 4, 8],
-    "m7":   [0, 3, 7, 10], "m9":  [0, 3, 7, 10, 14],
-    "7":    [0, 4, 7, 10], "9":   [0, 4, 7, 10, 14],
-    "2":    [0, 2, 4, 7],  "²":   [0, 2, 4, 7],
-    "m":    [0, 3, 7],
-    "":     [0, 4, 7],
-}
-
-
-def _parse_chord_token(tok: str) -> list[int] | None:
-    """Return list of MIDI notes for a chord token, or None if unrecognised."""
-    # Ignore slash bass note (G/B → G)
-    tok = tok.split("/")[0]
-    root_semi = None
-    quality_str = tok
-    for name, semi in _CHORD_ROOTS:
-        if tok.startswith(name):
-            root_semi = semi
-            quality_str = tok[len(name):]
-            break
-    if root_semi is None:
-        return None
-    intervals = _CHORD_QUALITIES.get(quality_str, _CHORD_QUALITIES[""])
-    # Voicing: root one octave lower (C3), chord tones in C4 range
-    bass = 48 + root_semi          # C3 = 48
-    upper = [60 + root_semi + iv for iv in intervals]
-    # Clamp upper notes to a singable range
-    upper = [n - 12 if n > 76 else n for n in upper]
-    return [bass] + upper
-
-
-def _synth_chord_block(midi_notes: list[int], duration: float,
-                       sr: int, rng: np.random.Generator,
-                       timbre: str = "鋼琴") -> np.ndarray:
-    n = int(sr * duration)
-    mixed = np.zeros(n, dtype=np.float64)
-    for midi in midi_notes:
-        freq = 440.0 * (2 ** ((midi - 69) / 12))
-        mixed += _tone(freq, duration, sr, timbre, rng).astype(np.float64)
-    peak = np.max(np.abs(mixed))
-    if peak > 0:
-        mixed /= peak
-    return (mixed * 0.28).astype(np.float32)
-
-
-def _synth_chord_sequence(text: str, bpm: int, sr: int,
-                          rng: np.random.Generator,
-                          beats_per_bar: int = 4,
-                          timbre: str = "鋼琴") -> np.ndarray:
-    beat = 60.0 / bpm
-    bars = text.split("|")
-    segments: list[np.ndarray] = []
-
-    for bar in bars:
-        chords = [t for t in bar.split() if t]
-        if not chords:
-            continue
-        dur = beat * beats_per_bar / len(chords)
-        for tok in chords:
-            notes = _parse_chord_token(tok)
-            if notes:
-                segments.append(_synth_chord_block(notes, dur, sr, rng, timbre))
-            else:
-                segments.append(np.zeros(int(sr * dur), dtype=np.float32))
-
-    return np.concatenate(segments) if segments else np.zeros(0, dtype=np.float32)
-
-
-def _lowpass(audio: np.ndarray, sr: int, cutoff: float = 8000.0) -> np.ndarray:
-    sos = _LOWPASS_SOS if (sr == 44100 and cutoff == 8000.0) else butter(4, cutoff / (sr / 2), btype="low", output="sos")
-    return sosfilt(sos, audio).astype(np.float32)
-
-
-def _tone_piano(freq: float, duration: float, sr: int, rng: np.random.Generator) -> np.ndarray:
-    n = int(sr * duration)
-    if n == 0:
-        return np.zeros(0, dtype=np.float32)
-    detune = 1.0 + rng.uniform(-0.002, 0.002)
-    f = freq * detune
-    t = np.linspace(0, duration, n, endpoint=False)
-    # Bright attack harmonics that decay at different rates
-    harmonics = [(1, 1.0, 3.0), (2, 0.60, 5.0), (3, 0.25, 8.0), (4, 0.10, 12.0), (5, 0.04, 18.0)]
-    wave = np.zeros(n, dtype=np.float64)
-    for h, amp, decay_rate in harmonics:
-        harmonic_decay = np.exp(-decay_rate * np.linspace(0, 1, n))
-        wave += amp * np.sin(2 * np.pi * f * h * t) * harmonic_decay
-    # Sharp percussive attack
-    atk = min(int(0.006 * sr), n)
-    env = np.ones(n, dtype=np.float32)
-    env[:atk] *= np.linspace(0, 1, atk) ** 0.5
-    fade = min(int(0.015 * sr), n)
-    env[n - fade:] *= np.linspace(1, 0, fade)
-    vel = rng.uniform(0.88, 1.12)
-    return (wave * env * 0.38 * vel).astype(np.float32)
-
-
-def _tone_guitar(freq: float, duration: float, sr: int, rng: np.random.Generator) -> np.ndarray:
-    """Karplus-Strong with brighter excitation for a more distinct plucked sound."""
-    period = max(2, int(sr / freq))
-    n = int(sr * duration)
-    if n == 0:
-        return np.zeros(0, dtype=np.float32)
-    # Brighter impulse: mix noise + sawtooth burst for more high-freq content
-    t_imp = np.linspace(0, 1, period)
-    impulse = rng.uniform(-1.0, 1.0, period) * 0.6 + (2 * (t_imp % 1.0) - 1) * 0.4
-    x = np.zeros(n, dtype=np.float64)
-    x[:period] = impulse
-    coeff = rng.uniform(0.996, 0.999)
-    a = np.zeros(period + 2)
-    a[0] = 1.0
-    a[period]     = -coeff * 0.5
-    a[period + 1] = -coeff * 0.5
-    out = lfilter([1.0], a, x)
-    # Body resonance: slight low-mid boost
-    out *= np.exp(-0.8 * np.linspace(0, 1, n))
-    fade = min(int(0.02 * sr), n)
-    out[n - fade:] *= np.linspace(1, 0, fade)
-    vel = rng.uniform(0.85, 1.15)
-    return (out * 0.70 * vel).astype(np.float32)
-
-
-def _tone_flute(freq: float, duration: float, sr: int, rng: np.random.Generator) -> np.ndarray:
-    """清亮長笛：以基音為主，緩慢起音，輕微顫音。"""
-    n = int(sr * duration)
-    if n == 0:
-        return np.zeros(0, dtype=np.float32)
-    t = np.linspace(0, duration, n, endpoint=False)
-    # Slight vibrato
-    vibrato = 1.0 + 0.003 * np.sin(2 * np.pi * 5.5 * t)
-    f = freq * vibrato
-    # Mostly fundamental, soft 2nd harmonic, tiny 3rd
-    wave = (np.sin(2 * np.pi * np.cumsum(f) / sr)
-            + 0.18 * np.sin(2 * np.pi * 2 * freq * t)
-            + 0.04 * np.sin(2 * np.pi * 3 * freq * t))
-    # Slow breath attack
-    atk = min(int(0.06 * sr), n)
-    env = np.ones(n, dtype=np.float32)
-    env[:atk] *= np.linspace(0, 1, atk) ** 1.5
-    fade = min(int(0.02 * sr), n)
-    env[n - fade:] *= np.linspace(1, 0, fade)
-    # Slight breathiness via noise
-    breath = rng.uniform(-1, 1, n) * 0.04
-    vel = rng.uniform(0.90, 1.10)
-    return ((wave + breath) * env * 0.42 * vel).astype(np.float32)
-
-
-def _tone_organ(freq: float, duration: float, sr: int, rng: np.random.Generator) -> np.ndarray:
-    """管風琴：鋸齒波諧波，持音不衰減，教會感。"""
-    n = int(sr * duration)
-    if n == 0:
-        return np.zeros(0, dtype=np.float32)
-    t = np.linspace(0, duration, n, endpoint=False)
-    # Drawbar-style harmonic mixing (fundamental + octaves + 5th)
-    drawbars = [(1, 0.8), (2, 0.6), (3, 0.4), (4, 0.3), (6, 0.2), (8, 0.15)]
-    wave = sum(amp * np.sin(2 * np.pi * freq * h * t) for h, amp in drawbars)
-    # Hard on/off with tiny fade
-    env = np.ones(n, dtype=np.float32)
-    atk = min(int(0.008 * sr), n)
-    env[:atk] *= np.linspace(0, 1, atk)
-    fade = min(int(0.015 * sr), n)
-    env[n - fade:] *= np.linspace(1, 0, fade)
-    return (wave * env * 0.28).astype(np.float32)
-
-
-def _tone_harp(freq: float, duration: float, sr: int, rng: np.random.Generator) -> np.ndarray:
-    """豎琴：Karplus-Strong，快速衰減，高頻清脆。"""
-    period = max(2, int(sr / freq))
-    n = int(sr * duration)
-    if n == 0:
-        return np.zeros(0, dtype=np.float32)
-    x = np.zeros(n, dtype=np.float64)
-    x[:period] = rng.uniform(-1.0, 1.0, period)
-    x[:period] += np.sin(np.linspace(0, np.pi, period)) * 0.5
-    # Slower decay so it rings (was 0.988–0.993, now closer to guitar)
-    coeff = rng.uniform(0.994, 0.997)
-    a = np.zeros(period + 2)
-    a[0] = 1.0
-    a[period]     = -coeff * 0.5
-    a[period + 1] = -coeff * 0.5
-    out = lfilter([1.0], a, x)
-    # Gentler decay — let it ring naturally, only slight extra envelope
-    out *= np.exp(-1.0 * np.linspace(0, 1, n))
-    # Short echo (~25ms) for body resonance
-    echo_delay = int(0.025 * sr)
-    if echo_delay < n:
-        out[echo_delay:] += out[:-echo_delay] * 0.18
-    fade = min(int(0.02 * sr), n)
-    out[n - fade:] *= np.linspace(1, 0, fade)
-    vel = rng.uniform(0.85, 1.15)
-    return (out * 0.72 * vel).astype(np.float32)
-
-
-def _tone_violin(freq: float, duration: float, sr: int, rng: np.random.Generator) -> np.ndarray:
-    """小提琴：帶弓擦雜訊的鋸齒波，緩慢起音，顫音。"""
-    n = int(sr * duration)
-    if n == 0:
-        return np.zeros(0, dtype=np.float32)
-    t = np.linspace(0, duration, n, endpoint=False)
-    # Vibrato builds up gradually
-    vib_depth = np.clip(np.linspace(0, 0.008, n), 0, 0.008)
-    phase = np.cumsum(2 * np.pi * freq * (1.0 + vib_depth * np.sin(2 * np.pi * 5.8 * t)) / sr)
-    # Sawtooth via harmonic sum — bowed string character
-    harmonics = [(1, 1.0), (2, 0.45), (3, 0.28), (4, 0.18), (5, 0.12), (6, 0.08)]
-    wave = sum(amp * np.sin(h * phase) for h, amp in harmonics)
-    # Bow noise: bandpass noise that fades after attack
-    noise_raw = rng.uniform(-1, 1, n)
-    # Simple bandpass: highpass then lowpass
-    b_hp, a_hp = butter(2, 800 / (sr / 2), btype="high")
-    b_lp, a_lp = butter(2, 3000 / (sr / 2), btype="low")
-    bow_noise = lfilter(b_lp, a_lp, lfilter(b_hp, a_hp, noise_raw))
-    noise_env = np.exp(-6.0 * np.linspace(0, 1, n)) * 0.35  # fades quickly
-    # Slow bow attack
-    atk = min(int(0.06 * sr), n)
-    env = np.ones(n, dtype=np.float32)
-    env[:atk] *= np.linspace(0, 1, atk) ** 1.5
-    fade = min(int(0.03 * sr), n)
-    env[n - fade:] *= np.linspace(1, 0, fade)
-    combined = (wave + bow_noise * noise_env) * env
-    vel = rng.uniform(0.88, 1.12)
-    return (combined * 0.24 * vel).astype(np.float32)
-
-
-def _tone(freq: float, duration: float, sr: int, timbre: str, rng: np.random.Generator) -> np.ndarray:
-    if timbre == "吉他":
-        return _tone_guitar(freq, duration, sr, rng)
-    if timbre == "長笛":
-        return _tone_flute(freq, duration, sr, rng)
-    if timbre == "管風琴":
-        return _tone_organ(freq, duration, sr, rng)
-    if timbre == "豎琴":
-        return _tone_harp(freq, duration, sr, rng)
-    if timbre == "小提琴":
-        return _tone_violin(freq, duration, sr, rng)
-    return _tone_piano(freq, duration, sr, rng)
-
-
-def _rest(duration: float, sr: int) -> np.ndarray:
-    return np.zeros(int(sr * duration), dtype=np.float32)
-
-
-def _click_track(total_samples: int, bpm: int, sr: int,
-                 beats_per_bar: int = 4, vol: float = 0.18) -> np.ndarray:
-    beat_samples = int(sr * 60.0 / bpm)
-    click = np.zeros(total_samples, dtype=np.float32)
-    pos = 0
-    beat_idx = 0
-    while pos < total_samples:
-        # 強拍用 1000Hz，弱拍用 800Hz
-        freq = 1000.0 if (beat_idx % beats_per_bar == 0) else 800.0
-        dur = int(0.02 * sr)  # 20ms click
-        t = np.linspace(0, 0.02, dur, endpoint=False)
-        burst = np.sin(2 * np.pi * freq * t) * np.exp(-80 * t)
-        end = min(pos + dur, total_samples)
-        click[pos:end] += burst[:end - pos]
-        pos += beat_samples
-        beat_idx += 1
-    return click * vol
-
-
-def parse_and_synth(text: str, key: str, bpm: int, octave: int,
-                    timbre: str = "鋼琴", chord_text: str = "",
-                    beats_per_bar: int = 4,
-                    metronome: bool = False,
-                    metronome_vol: float = 0.18) -> str:
-    sr = 44100
-    beat = 60.0 / bpm
-    root_midi = MELODY_KEY_ROOTS.get(key, 60) + (octave - 4) * 12
-
-    tokens = text.replace("|", " ").split()
-    segments: list[np.ndarray] = []
-    last_freq: float | None = None
-
-    for tok in tokens:
-        if not tok:
-            continue
-
-        # Standalone dash = extend previous note
-        if tok.lstrip("-") == "" and last_freq is not None:
-            extra = len(tok)
-            segments.append(_tone(last_freq, beat * extra, sr, timbre, _RNG))
-            continue
-
-        # Rest
-        if tok[0] == "0":
-            extra = tok.count("-")
-            segments.append(_rest(beat * (1 + extra), sr))
-            last_freq = None
-            continue
-
-        # Note token: digit [#] [' or ,]* [-]*
-        i = 0
-        if tok[i] not in JIANPU_INTERVALS:
-            continue
-        note_char = tok[i]; i += 1
-
-        sharp = flat = False
-        if i < len(tok) and tok[i] == "#":
-            sharp = True; i += 1
-        elif i < len(tok) and tok[i] == "b":
-            flat = True; i += 1
-
-        oct_shift = 0
-        while i < len(tok) and tok[i] in ("'", ","):
-            oct_shift += 1 if tok[i] == "'" else -1
-            i += 1
-
-        suffix = tok[i:]
-        underscores = suffix.count("_")
-        extra_beats = suffix.count("-")
-        dotted = "." in suffix
-
-        # _ = 八分音符 (0.5拍), __ = 十六分音符 (0.25拍), . = 附點(×1.5), 無 = 四分音符
-        if underscores >= 2:
-            duration = beat * 0.25
-        elif underscores == 1:
-            duration = beat * 0.5
-        else:
-            duration = beat * (1 + extra_beats)
-        if dotted:
-            duration *= 1.5
-
-        semitone = JIANPU_INTERVALS[note_char] + (1 if sharp else -1 if flat else 0)
-        midi = root_midi + semitone + oct_shift * 12
-        freq = 440.0 * (2 ** ((midi - 69) / 12))
-        last_freq = freq
-        segments.append(_tone(freq, duration, sr, timbre, _RNG))
-
-    has_chords = bool(chord_text and chord_text.strip())
-
-    if not segments and not has_chords:
-        raise ValueError("沒有解析到任何音符，請確認輸入格式。")
-
-    if segments:
-        melody_audio = np.concatenate(segments)
-    else:
-        melody_audio = np.zeros(0, dtype=np.float32)
-
-    if has_chords:
-        chord_audio = _synth_chord_sequence(chord_text, bpm, sr, _RNG, beats_per_bar, timbre)
-        if len(melody_audio) == 0:
-            audio = chord_audio
-        else:
-            ml, cl = len(melody_audio), len(chord_audio)
-            if cl < ml:
-                chord_audio = np.pad(chord_audio, (0, ml - cl))
-            elif cl > ml:
-                melody_audio = np.pad(melody_audio, (0, cl - ml))
-            audio = melody_audio * 0.72 + chord_audio
-    else:
-        audio = melody_audio
-
-    cutoff = TIMBRE_CUTOFF.get(timbre, 8000.0)
-    audio = _lowpass(audio.astype(np.float32), sr, cutoff=cutoff)
-    if metronome and len(audio) > 0:
-        click = _click_track(len(audio), bpm, sr, beats_per_bar, metronome_vol)
-        audio = audio + click
-    peak = np.max(np.abs(audio))
-    if peak > 0:
-        audio = audio / peak * 0.9
-    fd, out_path = tempfile.mkstemp(suffix=".wav")
-    os.close(fd)
-    _reg_tmp(out_path)
-    sf.write(out_path, audio, sr)
-    return out_path
-
 
 JIANPU_HELP = """
 ---
@@ -947,126 +433,6 @@ def _gen_melody(text, key, bpm, octave, timbre, chord_text, time_sig, metronome,
         return None, f"生成失敗：{e}"
 
 
-# ── 音頻轉譜 ──────────────────────────────────────────────────────────────────
-
-_CHORD_TEMPLATES: dict[str, np.ndarray] = {}
-
-def _build_chord_templates():
-    qualities = {
-        "":    [0, 4, 7],
-        "m":   [0, 3, 7],
-        "7":   [0, 4, 7, 10],
-        "m7":  [0, 3, 7, 10],
-        "maj7":[0, 4, 7, 11],
-        "dim": [0, 3, 6],
-        "sus4":[0, 5, 7],
-        "sus2":[0, 2, 7],
-    }
-    roots = [("C",0),("C#",1),("D",2),("D#",3),("E",4),("F",5),
-             ("F#",6),("G",7),("G#",8),("A",9),("A#",10),("B",11)]
-    for root, semi in roots:
-        for q, ivs in qualities.items():
-            tmpl = np.zeros(12)
-            for iv in ivs:
-                tmpl[(semi + iv) % 12] = 1.0
-            tmpl /= np.linalg.norm(tmpl)
-            name = root + q
-            _CHORD_TEMPLATES[name] = tmpl
-
-_build_chord_templates()
-
-
-def _midi_to_jianpu(midi: int, root_midi: int) -> str:
-    diff = midi - root_midi
-    oct_shift = 0
-    while diff < 0:
-        diff += 12; oct_shift -= 1
-    while diff >= 12:
-        diff -= 12; oct_shift += 1
-    iv_to_digit = {0:"1",2:"2",4:"3",5:"4",7:"5",9:"6",11:"7"}
-    # chromatic: snap to nearest scale tone
-    snapped = min(iv_to_digit.keys(), key=lambda x: abs(x - diff))
-    sharp = (diff not in iv_to_digit) and diff == snapped + 1
-    digit = iv_to_digit[snapped]
-    suffix = "#" if sharp else ""
-    if oct_shift > 0:
-        suffix += "'" * oct_shift
-    elif oct_shift < 0:
-        suffix += "," * (-oct_shift)
-    return digit + suffix
-
-
-def transcribe_audio(audio_path: str, key: str) -> tuple[str, str, str]:
-    """音頻 → 旋律簡譜 + 和弦譜（粗稿）"""
-    if not audio_path:
-        return "", "", "請先上傳音頻。"
-    try:
-        y, sr = librosa.load(audio_path, mono=True, duration=120)
-        root_midi = MELODY_KEY_ROOTS.get(key, 60)
-
-        # ── 旋律：pyin 基頻偵測 ──
-        f0, voiced_flag, _ = librosa.pyin(
-            y, fmin=librosa.note_to_hz("C2"), fmax=librosa.note_to_hz("C7"),
-            sr=sr, hop_length=512,
-        )
-        hop_sec = 512 / sr
-        notes = []
-        prev_digit = None
-        prev_dur = 0.0
-        beat_sec = 0.5  # assume eighth note grid ~120bpm as default
-
-        for freq, voiced in zip(f0, voiced_flag):
-            if voiced and freq is not None and not np.isnan(freq):
-                midi = int(round(librosa.hz_to_midi(freq)))
-                digit = _midi_to_jianpu(midi, root_midi)
-                if digit == prev_digit:
-                    prev_dur += hop_sec
-                else:
-                    if prev_digit is not None:
-                        beats = max(1, round(prev_dur / beat_sec))
-                        ext = "-" * (beats - 1)
-                        notes.append(prev_digit + ext)
-                    prev_digit = digit
-                    prev_dur = hop_sec
-            else:
-                if prev_digit is not None:
-                    beats = max(1, round(prev_dur / beat_sec))
-                    ext = "-" * (beats - 1)
-                    notes.append(prev_digit + ext)
-                    prev_digit = None
-                    prev_dur = 0.0
-
-        if prev_digit:
-            beats = max(1, round(prev_dur / beat_sec))
-            notes.append(prev_digit + "-" * (beats - 1))
-
-        melody_text = " ".join(notes) if notes else "（未偵測到旋律）"
-
-        # ── 和弦：每小節 chroma 模板比對 ──
-        hop = 2048
-        chroma = librosa.feature.chroma_cqt(y=y, sr=sr, hop_length=hop)
-        frames_per_bar = max(1, int(2.0 * sr / hop))  # ~2 sec per bar
-        chord_bars = []
-        for start in range(0, chroma.shape[1], frames_per_bar):
-            chunk = chroma[:, start:start + frames_per_bar].mean(axis=1)
-            norm = np.linalg.norm(chunk)
-            if norm < 0.01:
-                continue
-            chunk /= norm
-            best = max(_CHORD_TEMPLATES.items(), key=lambda kv: np.dot(kv[1], chunk))
-            chord_bars.append(best[0])
-
-        # Group into bars of 4
-        chord_lines = []
-        for i in range(0, len(chord_bars), 4):
-            chord_lines.append(" | ".join(chord_bars[i:i+4]))
-        chord_text = "\n".join(chord_lines) if chord_lines else "（未偵測到和弦）"
-
-        return melody_text, chord_text, f"轉譜完成（調性：{key}）⚠️ 為粗稿，請手動校正"
-    except Exception as e:
-        return "", "", f"錯誤：{e}"
-
-
 # ── 和弦調色盤 ────────────────────────────────────────────────────────────────
 
 def _audio_html(path: str | None) -> str:
@@ -1089,73 +455,6 @@ def _audio_html(path: str | None) -> str:
 
 
 # (interval from root in semitones, chord quality suffix) for major scale degrees I–VII
-DIATONIC_DEGREES = [(0, ""), (2, "m"), (4, "m"), (5, ""), (7, ""), (9, "m"), (11, "dim")]
-
-
-def get_diatonic_chords(key: str) -> list[str]:
-    root_semi = NOTE_MAP.get(key, 0)
-    result = []
-    for interval, quality in DIATONIC_DEGREES:
-        semi = (root_semi + interval) % 12
-        name = MAJOR_KEYS[semi]
-        display = KEY_DISPLAY.get(name, name).split("/")[0]
-        result.append(f"{display}{quality}")
-    return result
-
-
-def _write_normalized(audio: np.ndarray, sr: int) -> str:
-    peak = np.max(np.abs(audio))
-    if peak > 0:
-        audio = audio / peak * 0.85
-    fd, path = tempfile.mkstemp(suffix=".wav")
-    os.close(fd)
-    _reg_tmp(path)
-    sf.write(path, audio, sr)
-    return path
-
-
-def play_chord_audio(chord_name: str) -> str | None:
-    notes = _parse_chord_token(chord_name)
-    if not notes:
-        return None
-    sr = 44100
-    audio = _synth_chord_block(notes, 1.5, sr, _RNG)
-    audio = _lowpass(audio, sr)
-    return _write_normalized(audio, sr)
-
-
-def _apply_quality_mod(chord: str, mod: str) -> str:
-    mod = mod.split()[0]  # strip the Chinese label ("7 藍調" → "7")
-    if mod == "基本":
-        return chord
-    root = chord
-    is_minor = is_dim = False
-    for name, _ in _CHORD_ROOTS:
-        if chord.startswith(name):
-            root = name
-            q = chord[len(name):]
-            is_minor = q.startswith("m") and "maj" not in q
-            is_dim = "dim" in q
-            break
-    if mod == "m":
-        return root + "m"
-    if mod == "m7":
-        return root + "m7"
-    if mod == "7":
-        return root + ("dim7" if is_dim else "7")
-    if mod == "maj7":
-        return root + "maj7"
-    if mod == "sus4":
-        return root + "sus4"
-    if mod == "sus2":
-        return root + "sus2"
-    if mod == "add9":
-        return root + ("m9" if is_minor else "add9")
-    if mod == "dim":
-        return root + "dim"
-    return chord
-
-
 def on_chord_palette_btn(chord_name: str, chord_text: str, mode: str, quality_mod: str):
     effective = _apply_quality_mod(chord_name, quality_mod)
     path = play_chord_audio(effective)
@@ -1398,97 +697,93 @@ def download_youtube(url: str, cookies_file: str | None = None):
 
 
 
-with gr.Blocks(title="PitchPal", css=CSS) as demo:
-    gr.Markdown("""
-<div style="background:linear-gradient(135deg,#1a1a2e,#16213e,#0f3460);border-radius:12px;padding:22px 28px;margin-bottom:4px">
-<h1 style="color:#f0c040;margin:0;font-size:1.8em;letter-spacing:0.04em">🎵 PitchPal</h1>
-<p style="color:#a8c5e8;margin:6px 0 0;font-size:0.95em">調 KEY 工具 — 辨調、調 KEY、Capo 建議、旋律試聽，一站完成。</p>
-</div>
-""")
+with gr.Blocks(title="PitchPal", css=CSS, theme=THEME, js=FORCE_LIGHT_JS) as demo:
+    gr.HTML(MASTHEAD)
 
     with gr.Tabs():
 
-        # ── Tab 1：調 KEY 工具 ──────────────────────────────────────────────────
-        with gr.Tab("🎚️ 調 KEY 工具"):
+        # ── Tab 1：調 KEY ───────────────────────────────────────────────────────
+        with gr.Tab("調 KEY"):
 
-            # ── 上排：音源 | 分析結果（並排） ───────────────────────────────
+            gr.Markdown("音源", elem_classes="section-header")
+            gr.Markdown("把音檔拖進下方，或點一下選檔。分析會自動開始。", elem_classes="pp-hint")
+            audio_input = gr.Audio(
+                type="filepath",
+                sources=["upload"],
+                show_label=False,
+                elem_id="pp-upload",
+            )
+            gr.Markdown(
+                "支援 MP3、WAV、M4A、FLAC、MP4、MKV。音頻 100 MB、影片 200 MB、10 分鐘以內。",
+                elem_classes="pp-hint",
+            )
+            with gr.Accordion("用 YouTube 連結（實驗性）", open=False):
+                gr.Markdown(
+                    "雲端伺服器的 IP 常被 YouTube 封鎖，成功率約 40–60%，不穩定屬正常現象。"
+                    "建議優先上傳音檔。",
+                    elem_classes="pp-hint",
+                )
+                with gr.Row():
+                    yt_url_box = gr.Textbox(
+                        placeholder="https://www.youtube.com/watch?v=...",
+                        show_label=False,
+                        scale=4,
+                    )
+                    yt_btn = gr.Button("分析", variant="secondary", scale=1)
+                yt_status_box = gr.Textbox(
+                    show_label=False, interactive=False,
+                    placeholder="狀態…",
+                )
+                with gr.Accordion("遇到下載限制？", open=False):
+                    gr.Markdown(
+                        "用 **Get cookies.txt LOCALLY** 擴充套件匯出 YouTube cookies.txt 後上傳，"
+                        "可解決「需要登入」或「年齡限制」的問題。"
+                    )
+                    yt_cookies_file = gr.File(
+                        label="cookies.txt",
+                        file_types=[".txt"],
+                        type="filepath",
+                    )
+                gr.Markdown(
+                    "請確認你對該內容擁有合法授權（購買、CCLI 或版權方許可）。本工具僅供移調分析，授權責任由使用者自行承擔。",
+                    elem_classes="pp-hint",
+                )
+            filename_box = gr.Textbox(
+                label="檔案名稱",
+                interactive=False,
+                placeholder="上傳或下載後顯示…",
+                elem_classes="pp-big pp-note",
+            )
+
             with gr.Row(equal_height=False):
 
-                # 左：音源
-                with gr.Column(scale=5):
-                    gr.Markdown("**📂 音源**", elem_classes="section-header")
-                    audio_input = gr.Audio(
-                        type="filepath",
-                        sources=["upload"],
-                        show_label=False,
-                    )
-                    gr.Markdown(
-                        "<small>支援 MP3、WAV、M4A、FLAC、MP4、MKV｜音頻 100 MB / 影片 200 MB / 10 分鐘以內</small>",
-                    )
-                    with gr.Accordion("🔗 YouTube 連結（實驗性）", open=False):
-                        gr.Markdown(
-                            "<small>⚠️ 雲端伺服器 IP 常被 YouTube 封鎖，成功率約 40–60%，不穩定屬正常現象。"
-                            "建議優先使用上方直接上傳音檔。</small>"
-                        )
-                        with gr.Row():
-                            yt_url_box = gr.Textbox(
-                                placeholder="https://www.youtube.com/watch?v=...",
-                                show_label=False,
-                                scale=4,
-                            )
-                            yt_btn = gr.Button("▶ 分析", variant="secondary", scale=1)
-                        yt_status_box = gr.Textbox(
-                            show_label=False, interactive=False,
-                            placeholder="狀態…",
-                        )
-                        with gr.Accordion("遇到下載限制？", open=False):
-                            gr.Markdown(
-                                "用 **Get cookies.txt LOCALLY** 擴充套件匯出 YouTube cookies.txt 後上傳，"
-                                "可解決「需要登入」或「年齡限制」的問題。"
-                            )
-                            yt_cookies_file = gr.File(
-                                label="cookies.txt",
-                                file_types=[".txt"],
-                                type="filepath",
-                            )
-                        gr.Markdown(
-                            "<small>請確認你對該內容擁有合法授權（購買、CCLI 或版權方許可）。本工具僅供移調分析，授權責任由使用者自行承擔。</small>"
-                        )
-
-                # 右：分析結果
-                with gr.Column(scale=5):
-                    gr.Markdown("**🔍 分析結果**", elem_classes="section-header")
-                    filename_box = gr.Textbox(
-                        label="檔案 / 影片名稱",
+                # 左：原曲
+                with gr.Column(scale=1, min_width=320):
+                    gr.Markdown("原曲", elem_classes="section-header")
+                    detected_key_box = gr.Textbox(
+                        label="調性（自動偵測）",
                         interactive=False,
-                        placeholder="上傳或下載後顯示…",
+                        placeholder="—",
+                        elem_classes="pp-big pp-key",
                     )
-                    with gr.Row():
-                        detected_key_box = gr.Textbox(
-                            label="原曲調性（自動偵測）",
-                            interactive=False,
-                            placeholder="自動偵測…",
-                            scale=3,
-                        )
-                        confidence_box = gr.Textbox(
-                            label="信心度",
-                            interactive=False,
-                            value="—",
-                            scale=1,
-                        )
-                        bpm_box = gr.Textbox(
-                            label="BPM（自動偵測）",
-                            interactive=False,
-                            value="—",
-                            scale=2,
-                        )
+                    bpm_box = gr.Textbox(
+                        label="速度 BPM（自動偵測）",
+                        interactive=False,
+                        value="—",
+                        elem_classes="pp-big pp-bpm",
+                    )
+                    confidence_box = gr.Textbox(
+                        label="可信度",
+                        interactive=False,
+                        value="—",
+                        elem_classes="pp-big pp-note",
+                    )
                     key_override = gr.Dropdown(
-                        label="手動修正原 Key（偵測有誤時使用）",
+                        label="覺得不對？手動指定原曲調性",
                         choices=["（使用自動偵測）"] + ALL_KEYS,
                         value="（使用自動偵測）",
                     )
-                    gr.Markdown("<br>")
-                    with gr.Accordion("偵測結果不正確？回報給我們 🙏", open=False):
+                    with gr.Accordion("偵測結果不正確？回報給我們", open=False):
                         gr.Markdown(
                             "調性辨識對清晰樂器準確率較高。人聲為主、有混響或多次轉調的曲目偵測準確率會下降。"
                             "\n\n選擇正確調性後按「回報修正」即可，不需要登入，感謝幫助改善工具。"
@@ -1504,31 +799,29 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                         feedback_btn = gr.Button("回報修正", variant="secondary")
                         feedback_status = gr.Textbox(label="回報狀態", interactive=False)
 
-            # ── 下排：移調設定 | 音檔生成（並排） ──────────────────────────
-            with gr.Row(equal_height=False):
-
-                # 左：移調設定
-                with gr.Column(scale=5):
-                    gr.Markdown("**🎚️ 調 KEY 設定**", elem_classes="section-header")
-                    steps_slider = gr.Slider(
-                        label="移調半音數　　− 降調  ←  0  →  + 升調",
-                        minimum=-12, maximum=12, step=1, value=0,
-                    )
+                # 右：今天要唱
+                with gr.Column(scale=1, min_width=320):
+                    gr.Markdown("今天要唱", elem_classes="section-header")
                     result_key_box = gr.Textbox(
                         label="移調後調性",
                         interactive=False,
                         placeholder="—",
+                        elem_classes="pp-big pp-key pp-key-target",
                     )
+                    steps_slider = gr.Slider(
+                        label="移調半音數（往左降調，往右升調）",
+                        minimum=-12, maximum=12, step=1, value=0,
+                    )
+                    with gr.Row():
+                        step_down_btn = gr.Button("降 1 個半音", variant="secondary")
+                        step_up_btn = gr.Button("升 1 個半音", variant="secondary")
                     capo_box = gr.Textbox(
-                        label="🎸 Capo 建議（吉他）",
+                        label="吉他 Capo 建議",
                         interactive=False,
                         lines=3,
                         elem_id="capo-box",
+                        elem_classes="pp-big pp-capo",
                     )
-
-                # 右：音檔生成
-                with gr.Column(scale=5):
-                    gr.Markdown("**💾 音檔生成**", elem_classes="section-header")
                     output_fmt_radio = gr.Radio(
                         label="輸出格式",
                         choices=OUTPUT_FORMATS,
@@ -1541,6 +834,9 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                         label="狀態", interactive=False, placeholder="移調完成後顯示…"
                     )
                     audio_output = gr.Audio(label="移調後音頻", type="filepath")
+
+            step_down_btn.click(lambda v: max(-12, int(v) - 1), steps_slider, steps_slider, show_progress="hidden")
+            step_up_btn.click(lambda v: min(12, int(v) + 1), steps_slider, steps_slider, show_progress="hidden")
 
             # ── 事件綁定 ────────────────────────────────────────────────────
             yt_btn.click(
@@ -1590,22 +886,22 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
             )
 
         # ── Tab 2：旋律試聽 ──────────────────────────────────────────────────
-        with gr.Tab("🎼 旋律試聽"):
+        with gr.Tab("旋律試聽"):
             mod_state = gr.State(_MOD_INIT)
 
             # ── 範例（折疊在最上） ────────────────────────────────────────
-            with gr.Accordion("📖 輸入範例 & 格式說明", open=False):
+            with gr.Accordion("輸入範例 & 格式說明", open=False):
                 gr.Markdown(JIANPU_HELP)
 
             # ── 步驟一：旋律 + 和弦並排 ──────────────────────────────────
             gr.Markdown(
-                "<div style='color:#6b7280;font-size:0.85em;margin:10px 0 4px'>步驟一：填入旋律或和弦（兩者皆選填，可單獨使用）</div>"
+                "<div class='pp-hint'>步驟一：填入旋律或和弦（兩者皆選填，可單獨使用）</div>"
             )
             with gr.Row(equal_height=False):
 
                 # ── 旋律欄 ────────────────────────────────────────────────
                 with gr.Column(scale=5):
-                    gr.Markdown("**🎵 旋律**", elem_classes="section-header")
+                    gr.Markdown("旋律", elem_classes="section-header")
                     note_preview = gr.Audio(label="試音", autoplay=True, visible=True)
                     with gr.Row():
                         note_mode = gr.Radio(
@@ -1621,15 +917,15 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                         note_btn_6 = gr.Button("6", size="sm")
                         note_btn_7 = gr.Button("7", size="sm")
                         note_btn_0 = gr.Button("0 休", size="sm")
-                    gr.Markdown("<div style='font-size:0.72em;color:#9ca3af;margin:6px 0 2px'>半音</div>")
+                    gr.Markdown("<div class='pp-hint'>半音</div>")
                     with gr.Row(elem_classes="mod-palette"):
                         mod_sharp = gr.Button("# 升",  size="sm", variant="secondary")
                         mod_flat  = gr.Button("b 降",  size="sm", variant="secondary")
-                    gr.Markdown("<div style='font-size:0.72em;color:#9ca3af;margin:6px 0 2px'>八度</div>")
+                    gr.Markdown("<div class='pp-hint'>八度</div>")
                     with gr.Row(elem_classes="mod-palette"):
                         mod_high  = gr.Button("' 高八", size="sm", variant="secondary")
                         mod_low   = gr.Button(", 低八", size="sm", variant="secondary")
-                    gr.Markdown("<div style='font-size:0.72em;color:#9ca3af;margin:6px 0 2px'>時值</div>")
+                    gr.Markdown("<div class='pp-hint'>時值</div>")
                     with gr.Row(elem_classes="mod-palette"):
                         mod_eighth  = gr.Button("_ 八分", size="sm")
                         mod_sixteen = gr.Button("__ 十六", size="sm")
@@ -1641,11 +937,11 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                         placeholder="5 6 7 5 3 - - - | 7 5 6 -",
                         lines=3,
                     )
-                    melody_clear = gr.Button("🗑 清空旋律", size="sm", variant="secondary")
+                    melody_clear = gr.Button("清空旋律", size="sm", variant="secondary")
 
                 # ── 和弦欄 ────────────────────────────────────────────────
                 with gr.Column(scale=5):
-                    gr.Markdown("**🎸 和弦**", elem_classes="section-header")
+                    gr.Markdown("和弦", elem_classes="section-header")
                     chord_preview = gr.Audio(label="試音", autoplay=True, visible=True)
                     with gr.Row():
                         chord_mode = gr.Radio(
@@ -1653,7 +949,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                             show_label=False, scale=2,
                         )
                     chord_quality_state = gr.State("基本")
-                    gr.Markdown("<div style='font-size:0.72em;color:#9ca3af;margin:6px 0 2px'>和弦色彩</div>")
+                    gr.Markdown("<div class='pp-hint'>和弦色彩</div>")
                     with gr.Row(elem_classes="mod-palette"):
                         cq_basic = gr.Button("基本 ✓",    size="sm", variant="primary")
                         cq_m     = gr.Button("m 小調",    size="sm", variant="secondary")
@@ -1665,7 +961,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                         cq_sus2  = gr.Button("sus2 掛二", size="sm", variant="secondary")
                         cq_add9  = gr.Button("add9 加九", size="sm", variant="secondary")
                         cq_dim   = gr.Button("dim 減",    size="sm", variant="secondary")
-                    gr.Markdown("<div style='font-size:0.72em;color:#9ca3af;margin:6px 0 2px'>節拍</div>")
+                    gr.Markdown("<div class='pp-hint'>節拍</div>")
                     with gr.Row(elem_classes="mod-palette"):
                         barline_btn = gr.Button("| 小節線", size="sm")
                     _init_chords = get_diatonic_chords("G")
@@ -1682,11 +978,11 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                         placeholder="C Em7 | D | G/B | Em7 D",
                         lines=3,
                     )
-                    chord_clear = gr.Button("🗑 清空和弦", size="sm", variant="secondary")
+                    chord_clear = gr.Button("清空和弦", size="sm", variant="secondary")
 
             # ── 步驟二：設定 + 生成 ───────────────────────────────────────
             gr.Markdown(
-                "<div style='color:#6b7280;font-size:0.85em;margin:14px 0 4px'>步驟二：設定參數後生成</div>"
+                "<div class='pp-hint'>步驟二：設定參數後生成</div>"
             )
             with gr.Row():
                 melody_key = gr.Dropdown(
@@ -1714,7 +1010,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                     inputs=[metronome_toggle],
                     outputs=[metronome_vol],
                 )
-            melody_btn = gr.Button("🎵 生成試聽", variant="primary", size="lg")
+            melody_btn = gr.Button("生成試聽", variant="primary", size="lg")
             melody_status = gr.Textbox(label="狀態", interactive=False)
             melody_output = gr.Audio(label="試聽音頻", type="filepath")
 
@@ -1828,8 +1124,8 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
             melody_clear.click(fn=lambda: "", outputs=[melody_input])
             chord_clear.click(fn=lambda: "", outputs=[chord_input])
 
-        with gr.Tab("🔍 音頻轉譜（實驗）"):
-            gr.Markdown("## 🔍 音頻轉譜\n上傳音頻，自動產生旋律簡譜與和弦進行粗稿。\n\n> ⚠️ 此功能為**實驗性**，適合單聲部人聲或簡單樂器。輸出為粗稿，請手動校正後使用。")
+        with gr.Tab("更多工具"):
+            gr.Markdown("## 音頻轉譜（實驗）\n上傳音頻，自動產生旋律簡譜與和弦進行粗稿。\n\n此功能為**實驗性**，適合單聲部人聲或簡單樂器。輸出為粗稿，請手動校正後使用。")
             with gr.Row():
                 with gr.Column():
                     transcribe_audio_input = gr.Audio(
@@ -1838,7 +1134,7 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                     transcribe_key = gr.Dropdown(
                         label="調性（歌曲的 Key）", choices=MELODY_KEYS, value="G",
                     )
-                    transcribe_btn = gr.Button("🔍 開始轉譜", variant="primary")
+                    transcribe_btn = gr.Button("開始轉譜", variant="primary")
                     transcribe_status = gr.Textbox(label="狀態", interactive=False)
                 with gr.Column():
                     transcribe_melody_out = gr.Textbox(
@@ -1855,11 +1151,9 @@ with gr.Blocks(title="PitchPal", css=CSS) as demo:
                 outputs=[transcribe_melody_out, transcribe_chord_out, transcribe_status],
             )
 
-    gr.Markdown(
-        "<div style='text-align:center;color:#9ca3af;font-size:0.82em;margin:22px 0 6px;'>"
-        "🌿 PitchPal 是 EMMARK 作品集中的一個專案 · "
-        "<a href='https://windsjp00171-star.github.io/CLAUDE-DESIGN/' target='_blank' style='color:#f5a623;text-decoration:none;'>查看更多作品 →</a>"
-        "</div>"
+    gr.HTML(
+        "<div class='pp-footer'>PitchPal 是 EMMARK 作品集中的一個專案 · "
+        "<a href='https://windsjp00171-star.github.io/CLAUDE-DESIGN/' target='_blank'>查看更多作品</a></div>"
     )
 
 if __name__ == "__main__":
