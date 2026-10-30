@@ -20,15 +20,22 @@ python app.py
 ## 專案結構
 ```
 pitchpal/
-├── app.py          # 主程式（Gradio UI + 邏輯）
-├── requirements.txt
+├── app.py          # Gradio UI 與事件處理（上傳/移調/YouTube/回報）
+├── analysis.py     # 調性與 BPM 偵測（不依賴 Gradio，有測試）
+├── synth.py        # 簡譜/和弦合成、音色
+├── transcribe.py   # 音頻轉譜（實驗）
+├── keys.py         # 音名與調性常數
+├── tmpfiles.py     # 暫存檔登記與清理
+├── theme.py        # 視覺：Gradio 主題、CSS、字標（見 DESIGN.md）
+├── tests/test_analysis.py
+├── PRODUCT.md / DESIGN.md
 └── CLAUDE.md
 ```
 
-## 核心邏輯（app.py）
-- `detect_key(audio_path)` — 用 Krumhansl–Schmuckler 音調輪廓法偵測調性
-- `transpose_audio(audio_path, detected_key, target_key)` — 計算半音差並呼叫 librosa pitch_shift
-- Gradio Blocks UI，上傳後自動觸發 detect_key，按鈕觸發 transpose_audio
+## 核心邏輯
+- `analysis.detect_key` / `detect_bpm` — 和聲成分 + 調音校正 + Temperley 輪廓；信心度為第一名與第二名的差距，並回報「也可能是」候選。BPM 以打擊成分自相關並列出半速/倍速。
+- `app.analyze_audio` — 組成介面顯示文字（調性、可信度、BPM）。
+- 調性文字格式（如「C#/Db 大調」）被移調與 Capo 邏輯解析，不可改。
 
 ## 開發原則
 - 保持簡單，不要過度設計
