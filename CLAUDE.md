@@ -36,7 +36,7 @@ pitchpal/
 ```
 
 ## 核心邏輯
-- `analysis.detect_key` / `detect_bpm` — 調性：和聲成分 → 調音校正（偏差 ≥1/6 半音才套用）→ 中頻與低音色度 → 學出來的 24 調打分模型（`_W`/`_B`，由 `tools/train_key_model.py` 以 GiantSteps 訓練）；把握度為最高機率，並回報其餘兩個候選。BPM 以打擊成分自相關並列出半速/倍速。
+- `analysis.detect_key` / `detect_bpm` — 調性：和聲成分 → 調音校正（偏差 ≥1/6 半音才套用）→ 中頻、低音、高音三組色度 → 學出來的 24 調打分模型（`_W`/`_B`，由 `tools/train_key_model.py` 以 GiantSteps 與 GiantSteps-MTG 訓練）；把握度為最高機率，並回報其餘兩個候選。BPM 以打擊成分自相關並列出半速/倍速。
 - `app.analyze_audio` — 組成介面顯示文字（調性、可信度、BPM）。
 - 調性文字格式（如「C#/Db 大調」）被移調與 Capo 邏輯解析，不可改。
 

@@ -6,16 +6,17 @@ import numpy as np
 
 NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
-# 調性模型：24 個候選調（C…B 大調、C…B 小調）各自對「中頻色度 + 低音色度」打分，再做 softmax。
-# 權重由 GiantSteps 604 首真實錄音（EDM，附人工標註）學得；5 折交叉驗證（只看沒參與訓練的資料）：
-#   完全命中 57.8%（舊的 Krumhansl-Schmuckler 輪廓：42.9%），正確答案在前三名的比例 78%。
-# 模型輸出的最高機率可直接當把握度：說 85% 以上的實際命中 85%，不到 30% 的只有 24%。
-# 權重形狀 (大調/小調, 24)：前 12 個對應中頻色度（旋轉到該候選主音後），後 12 個對應低音色度。
+# 調性模型：24 個候選調（C…B 大調、C…B 小調）各自對「中頻 + 低音 + 高音色度」打分，再做 softmax。
+# 權重由 GiantSteps 604 首與 GiantSteps-MTG 1410 首真實錄音（EDM，附人工標註）學得；
+# 5 折交叉驗證（只看沒參與訓練的資料）：完全命中 59.9%（只用中頻＋低音 53.2%、舊的 Krumhansl-Schmuckler 輪廓約 43%），
+# 正確答案在前三名的比例 84.6%。高音區（C4–B6，旋律與人聲）是進步最大的一項。
+# 模型輸出的最高機率可直接當把握度：≥85% 的實際命中 87%、70–85% 為 80%、50–70% 為 65%、<30% 只有 27%。
+# 權重形狀 (大調/小調, 36)：依序對應 中頻、低音、高音 三組色度（各自旋轉到該候選主音後）。
 _W = np.array([
-    [2.0644, -1.4964, 0.1570, -0.6184, 1.3329, -0.0664, -1.6552, 2.0172, -1.0932, 0.3014, -0.5392, -0.4041, 0.9143, -0.4898, 0.4643, -0.5924, -0.1130, 0.7116, -0.3212, 0.0503, 0.3597, -0.0401, -0.4601, -0.4835],
-    [1.6271, -0.7464, -0.2288, 1.0703, -0.7525, -0.0971, -1.0338, 1.5485, -0.2613, -1.0569, 0.9319, -1.0010, 0.9869, -0.1455, -0.4611, -0.1531, 0.2124, -0.0302, 0.0920, -0.3546, 0.2386, -0.0776, -0.5021, 0.1943],
+    [0.9269, -0.4164, 0.1124, -0.3626, 0.2671, 0.1419, -0.4654, 0.5921, -0.2461, 0.2014, -0.4789, -0.2724, 0.7369, -0.0613, -0.2225, -0.4012, 0.2810, 0.1677, -0.2918, 0.1919, -0.0088, -0.2265, 0.0004, -0.1658, 1.4121, -1.1539, 0.5007, -1.0468, 1.4272, -0.4133, -1.1606, 1.5592, -0.9125, -0.0009, -0.2835, 0.0725],
+    [0.8407, 0.1135, -0.4275, 0.3162, -0.3852, 0.0379, -0.5526, 0.5206, 0.1472, -0.3036, -0.0159, -0.2913, 0.6913, -0.1368, -0.2170, 0.1053, -0.0495, -0.0703, 0.0024, -0.0082, -0.0924, -0.3344, 0.1105, -0.0009, 1.4049, -0.8962, 0.2610, 0.7155, 0.0237, -0.2787, -0.5380, 1.4798, -0.9321, -0.9263, 0.8358, -1.1496],
 ])
-_B = np.array([-1.1405, 1.1405])
+_B = np.array([-0.7766, 0.7766])
 
 SR = 22050
 MAX_ANALYSIS_SEC = 120   # 只分析中段最多 2 分鐘，控制運算時間
@@ -79,8 +80,8 @@ def _fold_chroma(chroma: np.ndarray) -> np.ndarray:
     return (frames * weights).sum(axis=1) / (weights.sum() + 1e-9)
 
 
-def _chroma_profile(y_h: np.ndarray, sr: int) -> tuple[np.ndarray, np.ndarray]:
-    """回傳 (中頻色度, 低音色度)。y_h 為和聲成分（已去掉鼓與打擊樂對音高的干擾）。"""
+def _chroma_profile(y_h: np.ndarray, sr: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """回傳 (中頻色度, 低音色度, 高音色度)。y_h 為和聲成分（已去掉鼓與打擊樂對音高的干擾）。"""
     # estimate_tuning 的單位是「一個 bin 的比例」；用 12 bins 估才涵蓋 ±半音，
     # 再換算成 36 bins/octave 的單位（1 半音 = 3 bins）餵給 chroma_cqt
     tuning_semitones = float(librosa.estimate_tuning(y=y_h, sr=sr, bins_per_octave=12))
@@ -88,19 +89,20 @@ def _chroma_profile(y_h: np.ndarray, sr: int) -> tuple[np.ndarray, np.ndarray]:
     if abs(tuning_semitones) < 0.17:
         tuning_semitones = 0.0
     kw = dict(y=y_h, sr=sr, tuning=tuning_semitones * 3, bins_per_octave=36, norm=None)
-    mid = librosa.feature.chroma_cqt(**kw, fmin=librosa.note_to_hz("C2"), n_octaves=6)   # 略過會蓋掉音高的超低頻
-    bass = librosa.feature.chroma_cqt(**kw, fmin=librosa.note_to_hz("C1"), n_octaves=2)  # 低音多半是和弦根音
-    return _fold_chroma(mid), _fold_chroma(bass)
+    mid = librosa.feature.chroma_cqt(**kw, fmin=librosa.note_to_hz("C2"), n_octaves=6)     # 略過會蓋掉音高的超低頻
+    bass = librosa.feature.chroma_cqt(**kw, fmin=librosa.note_to_hz("C1"), n_octaves=2)    # 低音多半是和弦根音
+    treble = librosa.feature.chroma_cqt(**kw, fmin=librosa.note_to_hz("C4"), n_octaves=3)  # 旋律與人聲
+    return _fold_chroma(mid), _fold_chroma(bass), _fold_chroma(treble)
 
 
-def _key_probabilities(mid: np.ndarray, bass: np.ndarray) -> np.ndarray:
-    """24 個候選調的機率（前 12 個大調、後 12 個小調）。"""
+def _key_probabilities(*chromas: np.ndarray) -> np.ndarray:
+    """24 個候選調的機率（前 12 個大調、後 12 個小調）。輸入依序為 中頻、低音、高音色度。"""
     def norm(c):
         return c / (c.sum() + 1e-9) * 12 - 1
-    mid, bass = norm(mid), norm(bass)
+    normed = [norm(c) for c in chromas]
     scores = np.empty(24)
     for k in range(24):
-        feat = np.concatenate([np.roll(mid, -(k % 12)), np.roll(bass, -(k % 12))])
+        feat = np.concatenate([np.roll(c, -(k % 12)) for c in normed])
         scores[k] = feat @ _W[k // 12] + _B[k // 12]
     scores -= scores.max()
     p = np.exp(scores)
@@ -110,10 +112,10 @@ def _key_probabilities(mid: np.ndarray, bass: np.ndarray) -> np.ndarray:
 def estimate_key(y: np.ndarray, sr: int, y_h: np.ndarray | None = None) -> KeyResult:
     if y_h is None:
         y_h = librosa.effects.harmonic(y, margin=1.0)
-    mid, bass = _chroma_profile(y_h, sr)
-    if mid.sum() <= 0:
+    chromas = _chroma_profile(y_h, sr)
+    if chromas[0].sum() <= 0:
         raise ValueError("音頻檔案幾乎是靜音。")
-    p = _key_probabilities(mid, bass)
+    p = _key_probabilities(*chromas)
     order = np.argsort(p)[::-1]
     best = int(order[0])
     alternatives = [(int(i) % 12, "大調" if i < 12 else "小調") for i in order[1:3]]
