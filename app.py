@@ -173,23 +173,23 @@ def _prepare_audio(file_path: str) -> tuple[str, bool]:
 
 
 def analyze_audio(audio_path: str) -> tuple[str, str, str]:
-    """偵測調性與 BPM，回傳 (調性, 信心度文字, BPM 文字) 供介面直接顯示。"""
+    """偵測調性與 BPM，回傳 (調性, 把握度與提醒文字, BPM 文字) 供介面直接顯示。"""
     duration = librosa.get_duration(path=audio_path)
     if duration > MAX_DURATION_SEC:
         raise ValueError(f"音頻長度 {duration/60:.1f} 分鐘，超過上限 {MAX_DURATION_SEC//60} 分鐘。")
     key = analysis.detect_key(audio_path)
-    conf_text = _conf_display(key.confidence)
-    hint = "、".join(dict.fromkeys(analysis.key_label(r, m) for r, m in key.alternatives))
-    if key.confidence < 70 and hint:
-        conf_text += f"｜調性也可能是：{hint}"
+    notes = [f"調性把握：{_conf_level(key.confidence)}"]
+    if key.confidence < 70:
+        hint = "、".join(dict.fromkeys(analysis.key_label(r, m) for r, m in key.alternatives))
+        notes.append(f"也可能是 {hint}")
     try:
         bpm = analysis.detect_bpm(audio_path)
         bpm_text = f"{bpm.bpm} BPM"
         if bpm.alternatives:
-            conf_text += "｜速度也可能是 " + " / ".join(str(b) for b in bpm.alternatives)
+            notes.append("速度也可能是 " + " / ".join(str(b) for b in bpm.alternatives) + " BPM")
     except ValueError:
         bpm_text = "—"
-    return key.name, conf_text, bpm_text
+    return key.name, "；".join(notes), bpm_text
 
 
 def result_key(detected_key: str, steps: int) -> str:
@@ -225,13 +225,10 @@ def capo_suggestions(key_str: str) -> str:
     return "\n".join(r[1] for r in results)
 
 
-def _conf_display(conf: int) -> str:
+def _conf_level(conf: int) -> str:
     if conf >= 70:
-        return f"高 {conf}%"
-    elif conf >= 40:
-        return f"中 {conf}%"
-    else:
-        return f"低 {conf}%"
+        return "高"
+    return "中" if conf >= 40 else "低"
 
 
 def process_upload(file):
@@ -408,8 +405,8 @@ def _submit_feedback(file, detected, conf_str, corrected, notes):
     if file:
         p = _resolve_path(file)
         filename = os.path.basename(p) if p else ""
-    m = re.search(r"(\d+)%", conf_str or "")
-    conf = int(m.group(1)) if m else None
+    level = re.search(r"調性把握：(高|中|低)", conf_str or "")
+    conf = {"高": 85, "中": 55, "低": 20}[level.group(1)] if level else None
     return submit_feedback(filename, detected, corrected, conf, notes)
 
 
@@ -711,51 +708,10 @@ with gr.Blocks(title="PitchPal", css=CSS, theme=THEME, js=FORCE_LIGHT_JS) as dem
                 type="filepath",
                 sources=["upload"],
                 show_label=False,
+                editable=False,
                 elem_id="pp-upload",
             )
-            gr.Markdown(
-                "支援 MP3、WAV、M4A、FLAC、MP4、MKV。音頻 100 MB、影片 200 MB、10 分鐘以內。",
-                elem_classes="pp-hint",
-            )
-            with gr.Accordion("用 YouTube 連結（實驗性）", open=False):
-                gr.Markdown(
-                    "雲端伺服器的 IP 常被 YouTube 封鎖，成功率約 40–60%，不穩定屬正常現象。"
-                    "建議優先上傳音檔。",
-                    elem_classes="pp-hint",
-                )
-                with gr.Row():
-                    yt_url_box = gr.Textbox(
-                        placeholder="https://www.youtube.com/watch?v=...",
-                        show_label=False,
-                        scale=4,
-                    )
-                    yt_btn = gr.Button("分析", variant="secondary", scale=1)
-                yt_status_box = gr.Textbox(
-                    show_label=False, interactive=False,
-                    placeholder="狀態…",
-                )
-                with gr.Accordion("遇到下載限制？", open=False):
-                    gr.Markdown(
-                        "用 **Get cookies.txt LOCALLY** 擴充套件匯出 YouTube cookies.txt 後上傳，"
-                        "可解決「需要登入」或「年齡限制」的問題。"
-                    )
-                    yt_cookies_file = gr.File(
-                        label="cookies.txt",
-                        file_types=[".txt"],
-                        type="filepath",
-                    )
-                gr.Markdown(
-                    "請確認你對該內容擁有合法授權（購買、CCLI 或版權方許可）。本工具僅供移調分析，授權責任由使用者自行承擔。",
-                    elem_classes="pp-hint",
-                )
-            filename_box = gr.Textbox(
-                label="檔案名稱",
-                interactive=False,
-                placeholder="上傳或下載後顯示…",
-                elem_classes="pp-big pp-note",
-            )
-
-            with gr.Row(equal_height=False):
+            with gr.Row(equal_height=False, elem_classes="pp-cols"):
 
                 # 左：原曲
                 with gr.Column(scale=1, min_width=320):
@@ -773,10 +729,16 @@ with gr.Blocks(title="PitchPal", css=CSS, theme=THEME, js=FORCE_LIGHT_JS) as dem
                         elem_classes="pp-big pp-bpm",
                     )
                     confidence_box = gr.Textbox(
-                        label="可信度",
+                        label="辨識把握度與提醒",
                         interactive=False,
                         value="—",
                         elem_classes="pp-big pp-note",
+                    )
+                    filename_box = gr.Textbox(
+                        label="目前檔案",
+                        interactive=False,
+                        placeholder="上傳或下載後顯示…",
+                        elem_classes="pp-big pp-small",
                     )
                     key_override = gr.Dropdown(
                         label="覺得不對？手動指定原曲調性",
@@ -834,6 +796,42 @@ with gr.Blocks(title="PitchPal", css=CSS, theme=THEME, js=FORCE_LIGHT_JS) as dem
                         label="狀態", interactive=False, placeholder="移調完成後顯示…"
                     )
                     audio_output = gr.Audio(label="移調後音頻", type="filepath")
+
+            gr.Markdown(
+                "支援 MP3、WAV、M4A、FLAC、MP4、MKV。音頻 100 MB、影片 200 MB、10 分鐘以內。",
+                elem_classes="pp-hint",
+            )
+            with gr.Accordion("用 YouTube 連結（實驗性）", open=False):
+                gr.Markdown(
+                    "雲端伺服器的 IP 常被 YouTube 封鎖，成功率約 40–60%，不穩定屬正常現象。"
+                    "建議優先上傳音檔。",
+                    elem_classes="pp-hint",
+                )
+                with gr.Row():
+                    yt_url_box = gr.Textbox(
+                        placeholder="https://www.youtube.com/watch?v=...",
+                        show_label=False,
+                        scale=4,
+                    )
+                    yt_btn = gr.Button("分析", variant="secondary", scale=1)
+                yt_status_box = gr.Textbox(
+                    show_label=False, interactive=False,
+                    placeholder="狀態…",
+                )
+                with gr.Accordion("遇到下載限制？", open=False):
+                    gr.Markdown(
+                        "用 **Get cookies.txt LOCALLY** 擴充套件匯出 YouTube cookies.txt 後上傳，"
+                        "可解決「需要登入」或「年齡限制」的問題。"
+                    )
+                    yt_cookies_file = gr.File(
+                        label="cookies.txt",
+                        file_types=[".txt"],
+                        type="filepath",
+                    )
+                gr.Markdown(
+                    "請確認你對該內容擁有合法授權（購買、CCLI 或版權方許可）。本工具僅供移調分析，授權責任由使用者自行承擔。",
+                    elem_classes="pp-hint",
+                )
 
             step_down_btn.click(lambda v: max(-12, int(v) - 1), steps_slider, steps_slider, show_progress="hidden")
             step_up_btn.click(lambda v: min(12, int(v) + 1), steps_slider, steps_slider, show_progress="hidden")

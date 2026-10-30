@@ -13,7 +13,7 @@ _VERMILION = gr.themes.Color(
 THEME = gr.themes.Base(
     primary_hue=_VERMILION,
     neutral_hue="stone",
-    font=("Noto Sans TC", "PingFang TC", "Microsoft JhengHei", "ui-sans-serif", "system-ui", "sans-serif"),
+    font=(gr.themes.GoogleFont("Noto Sans TC"), "PingFang TC", "Microsoft JhengHei", "ui-sans-serif", "system-ui", "sans-serif"),
     radius_size=gr.themes.sizes.radius_md,
 ).set(
     body_background_fill="#ffffff",
@@ -66,15 +66,17 @@ footer { display: none !important; }
 /* 字標 */
 .pp-masthead { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
   border-bottom: 3px solid var(--line); padding: 10px 0 10px; margin-bottom: 4px; }
-.pp-masthead h1 { margin: 0; font-size: 2rem; font-weight: 900; line-height: 1.1; }
+.pp-masthead h1 { margin: 0; font-size: 1.5rem; font-weight: 900; line-height: 1.1; }
 .pp-masthead p { margin: 0; color: var(--muted); font-size: 1rem; }
 
 /* 分頁 */
 .tab-nav, div[role="tablist"] { border-bottom: 2px solid var(--line) !important; }
 .tab-nav button, div[role="tablist"] button { font-size: 1.05rem !important; font-weight: 700 !important;
   padding: 10px 16px !important; color: var(--muted) !important; }
-.tab-nav button.selected, div[role="tablist"] button.selected { color: var(--ink) !important;
-  border-bottom: 4px solid var(--ink) !important; }
+.tab-nav button.selected, div[role="tablist"] button.selected, button[role="tab"][aria-selected="true"] { color: var(--ink) !important;
+  border-bottom: 4px solid var(--ink) !important; font-weight: 900 !important; }
+button[role="tab"][aria-selected="false"] { color: #6b645c !important; font-weight: 600 !important; }
+.tabs, .tabitem { padding-left: 0 !important; padding-right: 0 !important; }
 
 /* 區塊小標：粗線 + 實心字，不用側邊色條 */
 .section-header, .section-header p { font-size: 1.1rem; font-weight: 800; color: var(--ink);
@@ -92,12 +94,41 @@ input[type="number"] { font-size: 1.1rem !important; font-weight: 700 !important
 .pp-big textarea, .pp-big input[type="text"] { background: transparent !important; box-shadow: none !important;
   border: 0 !important; border-bottom: 2px solid var(--line) !important; border-radius: 0 !important;
   padding: 4px 0 !important; color: var(--ink) !important; -webkit-text-fill-color: var(--ink); opacity: 1 !important; }
-.pp-key textarea, .pp-key input[type="text"] { font-size: 2.8rem !important; font-weight: 900 !important; line-height: 1.2 !important; }
+.pp-key textarea, .pp-key input[type="text"] { font-size: 4.2rem !important; font-weight: 900 !important; line-height: 1.2 !important; }
 .pp-key-target textarea, .pp-key-target input[type="text"] { color: var(--accent) !important; -webkit-text-fill-color: var(--accent); }
-.pp-bpm textarea, .pp-bpm input[type="text"] { font-size: 2rem !important; font-weight: 800 !important; }
+.pp-bpm textarea, .pp-bpm input[type="text"] { font-size: 2.4rem !important; font-weight: 800 !important; }
 .pp-note textarea, .pp-note input[type="text"] { font-size: 1.05rem !important; font-weight: 600 !important; }
+.pp-small textarea, .pp-small input[type="text"] { font-size: 0.95rem !important; font-weight: 500 !important; }
 .pp-capo textarea { font-size: 1.2rem !important; font-weight: 700 !important; line-height: 1.6 !important; }
-.pp-big textarea::placeholder, .pp-big input::placeholder { color: #8a837a; font-weight: 500; }
+.pp-big textarea::placeholder, .pp-big input::placeholder { color: #6b645c; font-weight: 500; }
+
+/* Gradio 內建元件：標籤、數字框、滑桿端點、單選 */
+.gradio-container label > span, .gradio-container .block-title, .gradio-container .block-info { font-size: 0.95rem !important;
+  font-weight: 700 !important; color: var(--muted) !important; }
+.gradio-container .slider_input_container span, .gradio-container .range_input span { font-size: 0.9rem !important; color: var(--muted) !important; }
+.gradio-container input[type="radio"] + span, .gradio-container .wrap label span { font-size: 1.05rem !important; }
+.gradio-container ::placeholder { color: #6b645c !important; opacity: 1; }
+#pp-upload { --pp-tap: 44px; }
+#pp-upload button { min-width: var(--pp-tap) !important; min-height: var(--pp-tap) !important; font-size: 0.95rem !important; }
+#pp-upload .time, #pp-upload .timestamps, #pp-upload span, #pp-upload time { font-size: 0.9rem !important; color: var(--muted) !important; }
+#pp-upload .waveform-container, #pp-upload [data-testid="waveform-container"] { max-height: 70px; }
+.gradio-container .label-wrap + div, .gradio-container .label { font-size: 0.95rem; }
+
+/* 摺疊區：粗線上下框 + 繪製的箭頭，不用預設 ◀ */
+.gradio-container button.label-wrap, .gradio-container .label-wrap {
+  border-top: 2px solid var(--line) !important; border-bottom: 2px solid var(--line) !important;
+  border-radius: 0 !important; min-height: 48px; padding: 8px 4px !important;
+  display: flex !important; align-items: center; justify-content: space-between; font-size: 1.05rem !important; font-weight: 700 !important;
+}
+.gradio-container .label-wrap .icon { display: none !important; }
+.gradio-container .label-wrap::after { content: ""; width: 10px; height: 10px; flex: none; margin-right: 6px;
+  border-right: 3px solid var(--ink); border-bottom: 3px solid var(--ink); transform: rotate(45deg); transition: transform 0.15s ease-out; }
+.gradio-container .label-wrap.open::after { transform: rotate(-135deg); }
+
+/* 左右欄之間：粗細雙線（小節線） */
+@media (min-width: 769px) {
+  .pp-cols > div:first-child { border-right: 6px double var(--line); padding-right: 20px; margin-right: 8px; }
+}
 
 /* 按鈕 */
 button.lg, button.primary { min-height: 56px !important; font-size: 1.15rem !important; font-weight: 800 !important;
@@ -119,7 +150,7 @@ button { min-height: 44px; }
 
 @media (max-width: 768px) {
   .gradio-container { padding: 8px !important; font-size: 17px; }
-  .pp-key textarea, .pp-key input[type="text"] { font-size: 2.4rem !important; }
+  .pp-key textarea, .pp-key input[type="text"] { font-size: 3.4rem !important; }
   .chord-palette, .note-palette, .mod-palette { flex-wrap: wrap !important; gap: 6px !important; }
   .chord-palette button, .note-palette button, .mod-palette button { flex: 1 1 auto !important; }
   button { min-height: 48px; }
