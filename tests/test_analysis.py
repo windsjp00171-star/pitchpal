@@ -76,6 +76,23 @@ class TestDetectBpm:
         path = _write(tmp_path, _song(5, "大調", 68))
         assert analysis.detect_bpm(path).bpm < 80
 
+    @pytest.mark.parametrize("bpm,root,mode", [(72, 3, "小調"), (100, 8, "大調"), (118, 1, "大調")])
+    def test_tempo_not_in_training(self, tmp_path, bpm, root, mode):
+        # 訓練用的合成慢歌速度是 58,62,66,...；這幾個速度與調都沒用過
+        path = _write(tmp_path, _song(root, mode, bpm, bars=10))
+        r = analysis.detect_bpm(path)
+        assert abs(r.bpm - bpm) / bpm < 0.04 or any(abs(a - bpm) / bpm < 0.04 for a in r.alternatives)
+
+    def test_alternatives_are_distinct_and_limited(self, tmp_path):
+        r = analysis.detect_bpm(_write(tmp_path, _song(0, "大調", 90)))
+        assert len(r.alternatives) <= analysis.ALT_MAX
+        for a in r.alternatives:
+            assert abs(a - r.bpm) > 0.04 * r.bpm
+
+    def test_tree_score_is_probability(self):
+        p = analysis._tree_score([0.5] * 37)
+        assert 0.0 <= p <= 1.0
+
     def test_no_beat_raises(self, tmp_path):
         with pytest.raises(ValueError):
             analysis.estimate_bpm(np.zeros(SR * 3, dtype=np.float32), SR)
