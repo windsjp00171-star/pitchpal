@@ -106,6 +106,11 @@ input[type="number"] { font-size: 1.1rem !important; font-weight: 700 !important
 /* 上傳區要看得出邊界 */
 .pp-upload { border: 2px dashed var(--line) !important; border-radius: 8px !important; min-height: 140px; }
 
+/* 琴鍵音階圖 */
+.pp-kb { padding: 6px 2px 2px; }
+.pp-kb-cap { font-size: 0.95rem; font-weight: 700; color: var(--muted); margin-bottom: 6px; }
+.pp-kb-svg { display: block; width: 100%; height: auto; max-width: 440px; }
+
 /* 單選群組：橫向排列、等寬按鈕 */
 .gradio-container .wrap[role="radiogroup"], .gradio-container fieldset .wrap, .gradio-container .block:has(input[type="radio"]) .wrap { display: flex !important; flex-wrap: wrap; gap: 8px; }
 .gradio-container .block:has(input[type="radio"]) label { min-width: 84px; justify-content: center; text-align: center; }

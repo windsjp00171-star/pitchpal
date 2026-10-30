@@ -29,13 +29,14 @@ import base64
 import time
 
 import analysis
+from keyboard import keyboard_html
 from keys import ALL_KEYS, GUITAR_KEYS, KEY_DISPLAY, MAJOR_KEYS, MINOR_KEYS, NOTE_MAP
 from synth import (
     JIANPU_INTERVALS, MELODY_KEY_ROOTS, MELODY_KEYS, TIMBRE_CUTOFF, _RNG,
     _apply_quality_mod, _lowpass, _tone, _write_normalized,
     get_diatonic_chords, parse_and_synth, play_chord_audio,
 )
-from theme import CSS, FORCE_LIGHT_JS, MASTHEAD, THEME
+from theme import ACCENT, CSS, FORCE_LIGHT_JS, INK, MASTHEAD, THEME
 from tmpfiles import _reg_tmp
 from transcribe import transcribe_audio
 
@@ -721,6 +722,7 @@ with gr.Blocks(title="PitchPal", css=CSS, theme=THEME, js=FORCE_LIGHT_JS) as dem
                         placeholder="—",
                         elem_classes="pp-big pp-key",
                     )
+                    orig_keyboard = gr.HTML(keyboard_html("", INK, "原曲的音階"))
                     bpm_box = gr.Textbox(
                         label="速度 BPM（自動偵測）",
                         interactive=False,
@@ -769,6 +771,7 @@ with gr.Blocks(title="PitchPal", css=CSS, theme=THEME, js=FORCE_LIGHT_JS) as dem
                         placeholder="—",
                         elem_classes="pp-big pp-key pp-key-target",
                     )
+                    target_keyboard = gr.HTML(keyboard_html("", ACCENT, "要唱的音階"))
                     steps_slider = gr.Slider(
                         label="移調半音數（往左降調，往右升調）",
                         minimum=-12, maximum=12, step=1, value=0,
@@ -832,6 +835,8 @@ with gr.Blocks(title="PitchPal", css=CSS, theme=THEME, js=FORCE_LIGHT_JS) as dem
                     elem_classes="pp-hint",
                 )
 
+            detected_key_box.change(lambda k: keyboard_html(k, INK, "原曲的音階"), detected_key_box, orig_keyboard, show_progress="hidden")
+            result_key_box.change(lambda k: keyboard_html(k, ACCENT, "要唱的音階"), result_key_box, target_keyboard, show_progress="hidden")
             step_down_btn.click(lambda v: max(-12, int(v) - 1), steps_slider, steps_slider, show_progress="hidden")
             step_up_btn.click(lambda v: min(12, int(v) + 1), steps_slider, steps_slider, show_progress="hidden")
 
