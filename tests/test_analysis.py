@@ -115,17 +115,17 @@ class TestKeyModel:
     def test_probabilities_sum_to_one(self):
         import numpy as np
         mid = np.array([5.0, 0.5, 3.0, 0.5, 4.0, 3.0, 0.5, 4.5, 0.5, 3.0, 0.5, 2.0])
-        p = analysis._key_probabilities(mid / mid.sum(), mid / mid.sum())
+        p = analysis._key_probabilities(mid / mid.sum(), mid / mid.sum(), mid / mid.sum())
         assert p.shape == (24,) and abs(p.sum() - 1) < 1e-9
 
     def test_flat_chroma_is_not_confident(self):
         import numpy as np
         flat = np.full(12, 1 / 12)
-        assert analysis._key_probabilities(flat, flat).max() < 0.2
+        assert analysis._key_probabilities(flat, flat, flat).max() < 0.2
 
     def test_clear_c_major_triad_scale(self):
         import numpy as np
         c = np.zeros(12)
         c[[0, 2, 4, 5, 7, 9, 11]] = [3, 1, 2, 1.5, 2.5, 1, 0.5]       # C 大調音階，主音最重
         c = c / c.sum()
-        assert analysis._key_probabilities(c, c).argmax() in (0, 21)   # C 大調，或其相對小調 A 小調
+        assert analysis._key_probabilities(c, c, c).argmax() in (0, 21)   # C 大調，或其相對小調 A 小調

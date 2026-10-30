@@ -1,8 +1,11 @@
 """重新訓練調性模型（analysis.py 的 _W / _B）。
 
-資料：GiantSteps key dataset（音檔 *.mp3 與標註 *.LOFI.key，標註內容如 "C minor"）。
+資料（可重複 --set 合併多組）：
+  - GiantSteps key dataset：標註是資料夾，內有 <id>.LOFI.key（內容如 "C minor"）。
+  - GiantSteps-MTG key dataset：標註是單一檔案 annotations.txt（每列 ID<Tab>調性，如 "D# minor"）。
+  音檔都是 <id>.mp3。
 用法：
-    python tools/train_key_model.py AUDIO_DIR ANNOTATION_DIR [--limit N]
+    python tools/train_key_model.py --set 音檔資料夾 標註 [--set 音檔資料夾 標註 ...] [--limit N]
 輸出 5 折交叉驗證的完全命中率，以及可直接貼回 analysis.py 的權重。
 """
 import argparse
@@ -21,9 +24,28 @@ NAMES = {"C": 0, "C#": 1, "Db": 1, "D": 2, "D#": 3, "Eb": 3, "E": 4, "F": 5, "F#
          "G": 7, "G#": 8, "Ab": 8, "A": 9, "A#": 10, "Bb": 10, "B": 11}
 
 
-def label(path):
-    tonic, mode = open(path).read().split()[:2]
-    return NAMES[tonic] + (0 if mode.lower().startswith("maj") else 12)
+def parse_key(text):
+    p = text.strip().split()
+    if len(p) < 2 or p[0] not in NAMES:
+        return None
+    return NAMES[p[0]] + (0 if p[1].lower().startswith("maj") else 12)
+
+
+def read_labels(annotation):
+    """回傳 {id: 0..23}。annotation 是資料夾（每首一個 .LOFI.key）或單一 annotations.txt。"""
+    out = {}
+    if os.path.isdir(annotation):
+        for f in os.listdir(annotation):
+            if f.endswith(".LOFI.key"):
+                k = parse_key(open(os.path.join(annotation, f)).read())
+                if k is not None:
+                    out[f[: -len(".LOFI.key")]] = k
+    else:
+        for line in open(annotation, encoding="utf-8").read().splitlines()[1:]:
+            cols = line.split("\t")
+            if len(cols) >= 2 and parse_key(cols[1]) is not None:
+                out[cols[0]] = parse_key(cols[1])
+    return out
 
 
 def features(audio):
@@ -31,11 +53,10 @@ def features(audio):
     return analysis._chroma_profile(librosa.effects.harmonic(y, margin=1.0), sr)
 
 
-def candidates(mid, bass):
-    """24 個候選調各自的特徵：色度旋轉到該候選主音後的 [中頻, 低音]。與 analysis._key_probabilities 一致。"""
-    norm = lambda c: c / (c.sum() + 1e-9) * 12 - 1  # noqa: E731
-    mid, bass = norm(mid), norm(bass)
-    return np.stack([np.concatenate([np.roll(mid, -(k % 12)), np.roll(bass, -(k % 12))]) for k in range(24)])
+def candidates(*chromas):
+    """24 個候選調各自的特徵：每組色度旋轉到該候選主音後串起來。與 analysis._key_probabilities 一致。"""
+    normed = [c / (c.sum() + 1e-9) * 12 - 1 for c in chromas]
+    return np.stack([np.concatenate([np.roll(c, -(k % 12)) for c in normed]) for k in range(24)])
 
 
 def fit(R, y, l2=1e-3):
@@ -66,24 +87,24 @@ def predict(R, W, b):
 
 
 def _one(args):
-    audio, ann = args
+    audio, lab = args
     try:
-        return candidates(*features(audio)), label(ann)
+        return candidates(*features(audio)), lab
     except Exception:
         return None
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("audio_dir")
-    ap.add_argument("annotation_dir")
+    ap.add_argument("--set", nargs=2, action="append", metavar=("AUDIO_DIR", "ANNOTATION"), required=True)
     ap.add_argument("--limit", type=int, default=0)
     a = ap.parse_args()
-    ids = sorted(f[:-4] for f in os.listdir(a.audio_dir) if f.endswith(".mp3"))
-    ids = [i for i in ids if os.path.exists(f"{a.annotation_dir}/{i}.LOFI.key")]
+    jobs = []
+    for audio_dir, annotation in a.set:
+        labels = read_labels(annotation)
+        jobs += [(f"{audio_dir}/{i}.mp3", lab) for i, lab in sorted(labels.items()) if os.path.exists(f"{audio_dir}/{i}.mp3")]
     if a.limit:
-        ids = ids[:a.limit]
-    jobs = [(f"{a.audio_dir}/{i}.mp3", f"{a.annotation_dir}/{i}.LOFI.key") for i in ids]
+        jobs = jobs[:a.limit]
     with ProcessPoolExecutor(4) as ex:
         rows = [r for r in ex.map(_one, jobs, chunksize=4) if r]
     R, y = np.stack([r[0] for r in rows]), np.array([r[1] for r in rows])
