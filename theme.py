@@ -36,7 +36,7 @@ FORCE_LIGHT_JS = """() => {
     document.documentElement.classList.remove('dark');
     document.body.classList.remove('dark');
   };
-  const zh = { 'Drop Audio Here': '把音檔拖到這裡', 'Click to Upload': '點一下選檔', '- or -': '或' };
+  const zh = { 'Drop Audio Here': '把音檔拖到這裡', 'Click to Upload': '點一下選檔', '- or -': '或', 'or': '或' };
   const localize = () => {
     const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
     for (let n = w.nextNode(); n; n = w.nextNode()) {
@@ -53,9 +53,26 @@ FORCE_LIGHT_JS = """() => {
 
 MASTHEAD = """
 <div class="pp-masthead">
-  <h1>PitchPal</h1>
-  <p>辨調、調 KEY、Capo 建議、旋律試聽</p>
+  <svg class="pp-logo" viewBox="0 0 48 48" role="img" aria-label="PitchPal">
+    <rect width="48" height="48" rx="10" fill="#C8321A"/>
+    <ellipse cx="19" cy="34" rx="8.5" ry="6" transform="rotate(-20 19 34)" fill="#fff"/>
+    <rect x="25.5" y="9" width="3.6" height="25" fill="#fff"/>
+    <path d="M29 9 C 36 12 38 17 36 23 C 35 19 33 17 29 16 Z" fill="#fff"/>
+  </svg>
+  <div class="pp-brand">
+    <h1>PitchPal</h1>
+    <p>辨調、調 KEY、Capo 建議、旋律試聽</p>
+  </div>
 </div>
+<svg class="pp-staff" viewBox="0 0 100 20" preserveAspectRatio="none" aria-hidden="true">
+  <g stroke="#16130f" stroke-width="0.5" vector-effect="non-scaling-stroke" opacity="0.35">
+    <line x1="0" y1="2" x2="100" y2="2" vector-effect="non-scaling-stroke"/>
+    <line x1="0" y1="6" x2="100" y2="6" vector-effect="non-scaling-stroke"/>
+    <line x1="0" y1="10" x2="100" y2="10" vector-effect="non-scaling-stroke"/>
+    <line x1="0" y1="14" x2="100" y2="14" vector-effect="non-scaling-stroke"/>
+    <line x1="0" y1="18" x2="100" y2="18" vector-effect="non-scaling-stroke"/>
+  </g>
+</svg>
 """
 
 CSS = """
@@ -63,11 +80,12 @@ CSS = """
 .gradio-container { max-width: 1040px !important; margin: auto; font-size: 17px; color: var(--ink); }
 footer { display: none !important; }
 
-/* 字標 */
-.pp-masthead { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
-  border-bottom: 3px solid var(--line); padding: 10px 0 10px; margin-bottom: 4px; }
-.pp-masthead h1 { margin: 0; font-size: 1.5rem; font-weight: 900; line-height: 1.1; }
-.pp-masthead p { margin: 0; color: var(--muted); font-size: 1rem; }
+/* 字標：徽章 + 字標 + 五線譜 */
+.pp-masthead { display: flex; align-items: center; gap: 14px; padding: 12px 0 4px; }
+.pp-logo { width: 48px; height: 48px; flex: none; }
+.pp-brand h1 { margin: 0; font-size: 1.9rem; font-weight: 900; line-height: 1.05; letter-spacing: 0; }
+.pp-brand p { margin: 2px 0 0; color: var(--muted); font-size: 1rem; }
+.pp-staff { display: block; width: 100%; height: 22px; border-bottom: 3px solid var(--line); margin-bottom: 2px; }
 
 /* 分頁 */
 .tab-nav, div[role="tablist"] { border-bottom: 2px solid var(--line) !important; }
@@ -86,7 +104,11 @@ button[role="tab"][aria-selected="false"] { color: #6b645c !important; font-weig
 input[type="number"] { font-size: 1.1rem !important; font-weight: 700 !important; min-width: 64px; }
 
 /* 上傳區要看得出邊界 */
-#pp-upload { border: 2px dashed var(--line) !important; border-radius: 8px !important; min-height: 140px; }
+.pp-upload { border: 2px dashed var(--line) !important; border-radius: 8px !important; min-height: 140px; }
+
+/* 單選群組：橫向排列、等寬按鈕 */
+.gradio-container .wrap[role="radiogroup"], .gradio-container fieldset .wrap, .gradio-container .block:has(input[type="radio"]) .wrap { display: flex !important; flex-wrap: wrap; gap: 8px; }
+.gradio-container .block:has(input[type="radio"]) label { min-width: 84px; justify-content: center; text-align: center; }
 
 /* 結果欄：大字、無外框，像譜上的標題列 */
 .pp-big label > span, .pp-big .label-wrap span { font-size: 0.95rem !important; font-weight: 700 !important;
@@ -94,8 +116,8 @@ input[type="number"] { font-size: 1.1rem !important; font-weight: 700 !important
 .pp-big textarea, .pp-big input[type="text"] { background: transparent !important; box-shadow: none !important;
   border: 0 !important; border-bottom: 2px solid var(--line) !important; border-radius: 0 !important;
   padding: 4px 0 !important; color: var(--ink) !important; -webkit-text-fill-color: var(--ink); opacity: 1 !important; }
-.pp-key textarea, .pp-key input[type="text"] { font-size: 4.2rem !important; font-weight: 900 !important; line-height: 1.2 !important; }
-.pp-key-target textarea, .pp-key-target input[type="text"] { color: var(--accent) !important; -webkit-text-fill-color: var(--accent); }
+.pp-key textarea, .pp-key input[type="text"] { font-size: 3.8rem !important; font-weight: 900 !important; line-height: 1.2 !important; }
+.pp-key-target textarea, .pp-key-target input[type="text"] { color: #a82813 !important; -webkit-text-fill-color: var(--accent); }
 .pp-bpm textarea, .pp-bpm input[type="text"] { font-size: 2.4rem !important; font-weight: 800 !important; }
 .pp-note textarea, .pp-note input[type="text"] { font-size: 1.05rem !important; font-weight: 600 !important; }
 .pp-small textarea, .pp-small input[type="text"] { font-size: 0.95rem !important; font-weight: 500 !important; }
@@ -108,7 +130,7 @@ input[type="number"] { font-size: 1.1rem !important; font-weight: 700 !important
 .gradio-container .slider_input_container span, .gradio-container .range_input span { font-size: 0.9rem !important; color: var(--muted) !important; }
 .gradio-container input[type="radio"] + span, .gradio-container .wrap label span { font-size: 1.05rem !important; }
 .gradio-container ::placeholder { color: #6b645c !important; opacity: 1; }
-#pp-upload { --pp-tap: 44px; }
+.pp-upload, #pp-upload { --pp-tap: 44px; }
 #pp-upload button { min-width: var(--pp-tap) !important; min-height: var(--pp-tap) !important; font-size: 0.95rem !important; }
 #pp-upload .time, #pp-upload .timestamps, #pp-upload span, #pp-upload time { font-size: 0.9rem !important; color: var(--muted) !important; }
 #pp-upload .waveform-container, #pp-upload [data-testid="waveform-container"] { max-height: 70px; }
@@ -129,6 +151,31 @@ input[type="number"] { font-size: 1.1rem !important; font-weight: 700 !important
 @media (min-width: 769px) {
   .pp-cols > div:first-child { border-right: 6px double var(--line); padding-right: 20px; margin-right: 8px; }
 }
+
+/* 結果格：譜表頭的格子 */
+.pp-key, .pp-bpm { border: 3px solid var(--line) !important; border-radius: 6px !important; padding: 10px 18px 6px !important;
+  background: #fff !important; }
+.pp-key textarea, .pp-key input[type="text"], .pp-bpm textarea, .pp-bpm input[type="text"] { border-bottom: 0 !important; }
+.pp-key-target { border-color: var(--accent) !important; background: #fdf1ee !important; }
+.pp-bpm { position: relative; }
+.pp-bpm label, .pp-bpm textarea, .pp-bpm input[type="text"] { padding-left: 66px !important; }
+.pp-bpm label { display: block; text-align: left; }
+.gradio-container .secondary-wrap input { border: 0 !important; box-shadow: none !important; }
+.pp-bpm::before { content: ""; position: absolute; left: 18px; top: 50%; width: 52px; height: 52px; transform: translateY(-38%);
+  background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 52 52'><ellipse cx='12' cy='38' rx='9' ry='6.4' transform='rotate(-20 12 38)' fill='%2316130f'/><rect x='19' y='6' width='3.6' height='32' fill='%2316130f'/><rect x='30' y='26' width='16' height='3.4' fill='%2316130f'/><rect x='30' y='36' width='16' height='3.4' fill='%2316130f'/></svg>") no-repeat center / contain; }
+
+/* 輸入、下拉、滑桿、單選：同一套粗框語彙 */
+.gradio-container input[type="range"] { accent-color: var(--accent); height: 10px; }
+.gradio-container input[type="range"]::-webkit-slider-thumb { width: 28px; height: 28px; }
+.gradio-container input[type="range"]::-moz-range-thumb { width: 28px; height: 28px; }
+.gradio-container .wrap-inner, .gradio-container .secondary-wrap { border-radius: 8px !important; }
+.gradio-container .block:not(.pp-big) input[type="text"], .gradio-container .block:not(.pp-big) textarea,
+.gradio-container .secondary-wrap { border: 2px solid var(--line) !important; border-radius: 8px !important; background: #fff !important; box-shadow: none !important; }
+.gradio-container input[type="radio"] { accent-color: var(--accent); width: 20px; height: 20px; }
+.gradio-container fieldset label, .gradio-container .wrap > label { border: 2px solid var(--line) !important; border-radius: 8px !important;
+  background: #fff !important; padding: 10px 16px !important; min-height: 44px; }
+.gradio-container label.selected { background: var(--ink) !important; border-color: var(--ink) !important; }
+.gradio-container label.selected, .gradio-container label.selected span { color: #fff !important; }
 
 /* 按鈕 */
 button.lg, button.primary { min-height: 56px !important; font-size: 1.15rem !important; font-weight: 800 !important;

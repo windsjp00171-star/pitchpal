@@ -12,7 +12,7 @@ _MAJOR_PROFILE = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39,
 _MINOR_PROFILE = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
 
 SR = 22050
-MAX_ANALYSIS_SEC = 180   # 只分析中段最多 3 分鐘，控制運算時間
+MAX_ANALYSIS_SEC = 120   # 只分析中段最多 2 分鐘，控制運算時間
 
 BPM_MIN, BPM_MAX = 50, 200
 BPM_PRIOR_CENTER = 95    # 敬拜曲常見速度中心；只用來在倍速/半速之間取捨
@@ -73,9 +73,8 @@ def _fold_chroma(chroma: np.ndarray) -> np.ndarray:
     return (frames * weights).sum(axis=1) / (weights.sum() + 1e-9)
 
 
-def _chroma_profile(y: np.ndarray, sr: int) -> np.ndarray:
-    # 取和聲成分，去掉鼓與打擊樂對音高的干擾；並校正整首歌的調音偏差
-    y_h = librosa.effects.harmonic(y, margin=1.0)
+def _chroma_profile(y_h: np.ndarray, sr: int) -> np.ndarray:
+    # y_h 為和聲成分（已去掉鼓與打擊樂對音高的干擾）；並校正整首歌的調音偏差
     # estimate_tuning 的單位是「一個 bin 的比例」；用 12 bins 估才涵蓋 ±半音，
     # 再換算成 36 bins/octave 的單位（1 半音 = 3 bins）餵給 chroma_cqt
     tuning_semitones = float(librosa.estimate_tuning(y=y_h, sr=sr, bins_per_octave=12))
@@ -99,8 +98,10 @@ def _corr_all_keys(chroma: np.ndarray) -> np.ndarray:
     return scores
 
 
-def estimate_key(y: np.ndarray, sr: int) -> KeyResult:
-    scores = _corr_all_keys(_chroma_profile(y, sr))
+def estimate_key(y: np.ndarray, sr: int, y_h: np.ndarray | None = None) -> KeyResult:
+    if y_h is None:
+        y_h = librosa.effects.harmonic(y, margin=1.0)
+    scores = _corr_all_keys(_chroma_profile(y_h, sr))
 
     order = np.argsort(scores)[::-1]
     best = int(order[0])
@@ -130,9 +131,8 @@ def detect_key(audio_path: str) -> KeyResult:
 
 # ── BPM ───────────────────────────────────────────────────────────────────────
 
-def _tempo_curve(y: np.ndarray, sr: int, hop: int = 512):
+def _tempo_curve(y_p: np.ndarray, sr: int, hop: int = 512):
     """以打擊成分的 onset 強度做自相關，回傳 (bpm 陣列, 強度陣列)。"""
-    y_p = librosa.effects.percussive(y, margin=2.0)
     onset = librosa.onset.onset_strength(y=y_p, sr=sr, hop_length=hop, aggregate=np.median)
     if onset.std() < 1e-9:
         return None, None
@@ -148,8 +148,10 @@ def _tempo_curve(y: np.ndarray, sr: int, hop: int = 512):
     return bpms[mask][::-1], ac[mask][::-1]
 
 
-def estimate_bpm(y: np.ndarray, sr: int) -> BpmResult:
-    bpms, strength = _tempo_curve(y, sr)
+def estimate_bpm(y: np.ndarray, sr: int, y_p: np.ndarray | None = None) -> BpmResult:
+    if y_p is None:
+        y_p = librosa.effects.percussive(y, margin=2.0)
+    bpms, strength = _tempo_curve(y_p, sr)
     if bpms is None:
         raise ValueError("找不到明顯的節拍。")
 
@@ -177,3 +179,16 @@ def estimate_bpm(y: np.ndarray, sr: int) -> BpmResult:
 def detect_bpm(audio_path: str) -> BpmResult:
     y, sr = load_audio(audio_path)
     return estimate_bpm(y, sr)
+
+
+def analyze(audio_path: str) -> tuple[KeyResult, "BpmResult | None"]:
+    """調性與 BPM 一起算：只讀檔一次、只做一次和聲/打擊分離。找不到節拍時 BPM 為 None。"""
+    y, sr = load_audio(audio_path)
+    H, P = librosa.decompose.hpss(librosa.stft(y), margin=(1.0, 2.0))
+    n = len(y)
+    key = estimate_key(y, sr, y_h=librosa.istft(H, length=n))
+    try:
+        bpm = estimate_bpm(y, sr, y_p=librosa.istft(P, length=n))
+    except ValueError:
+        bpm = None
+    return key, bpm
