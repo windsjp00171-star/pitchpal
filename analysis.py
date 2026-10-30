@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 
 import librosa
 import numpy as np
+from scipy.signal import find_peaks
 
 NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
@@ -26,9 +27,6 @@ _B = _B_TRAINED + np.array([np.log(0.73 / 0.27), 0.0])
 SR = 22050
 MAX_ANALYSIS_SEC = 120   # 只分析中段最多 2 分鐘，控制運算時間
 
-BPM_MIN, BPM_MAX = 50, 200
-BPM_PRIOR_CENTER = 95    # 敬拜曲常見速度中心；只用來在倍速/半速之間取捨
-BPM_PRIOR_SIGMA = 0.55   # 以 octave（2 倍）為單位
 
 
 @dataclass
@@ -133,50 +131,100 @@ def detect_key(audio_path: str) -> KeyResult:
 
 
 # ── BPM ───────────────────────────────────────────────────────────────────────
+# 做法：從節奏訊號（打擊成分、全頻、低頻鼓點、高頻打擊各一條）算自相關曲線，找出幾個候選速度，
+# 再由訓練好的樹模型替每個候選打分，挑最像「人會打拍子的速度」的那個。
+# 特徵只用「候選和它的半速、倍速等在節奏上誰更強」的相對值，不含絕對速度，所以不偏愛快歌或慢歌。
+# 訓練資料：GiantSteps tempo 664 首真實錄音（EDM）＋ 36 首合成慢歌（58–140 BPM，權重 5）。
+# 664 首 5 折交叉驗證（只看沒參與訓練的資料）：嚴格命中（±4%）85.5%（舊做法 21.4%），
+# 答案在「第一名＋也可能是」裡的比例 93.2%；第一名機率 ≥95% 的 100% 命中。
 
-def _tempo_curve(y_p: np.ndarray, sr: int, hop: int = 512):
-    """以打擊成分的 onset 強度做自相關，回傳 (bpm 陣列, 強度陣列)。"""
-    onset = librosa.onset.onset_strength(y=y_p, sr=sr, hop_length=hop, aggregate=np.median)
-    if onset.std() < 1e-9:
-        return None, None
+HOP = 512
+_RATIOS = (1, 2, 0.5, 1.5, 2 / 3, 3, 1 / 3, 4, 0.25)
+_KINDS = ("perc", "full", "low", "high")
+ALT_MIN_PROB = 0.08      # 其他候選的機率至少這麼高才列為「也可能是」
+ALT_MAX = 2
+
+
+def _autocorr_curve(onset: np.ndarray, sr: int):
+    """onset 強度的自相關，回傳 (bpm 由小到大, 強度)。"""
     onset = onset - onset.mean()
     ac = librosa.autocorrelate(onset, max_size=len(onset) // 2)
     ac = np.maximum(ac, 0)
     ac = ac / (ac[0] + 1e-9)
-
     lags = np.arange(len(ac))
     lags[0] = 1
-    bpms = 60.0 * sr / (hop * lags)
-    mask = (bpms >= BPM_MIN) & (bpms <= BPM_MAX)
+    bpms = 60.0 * sr / (HOP * lags)
+    mask = (bpms >= 40) & (bpms <= 260)
     return bpms[mask][::-1], ac[mask][::-1]
+
+
+def tempo_curves(y: np.ndarray, y_p: np.ndarray, sr: int) -> dict:
+    """四條節奏曲線：{kind: (bpms, strength) 或 None}。y 為原音、y_p 為其打擊成分。"""
+    S = np.abs(librosa.stft(y_p, hop_length=HOP))
+    f = librosa.fft_frequencies(sr=sr)
+    onsets = {
+        "perc": librosa.onset.onset_strength(y=y_p, sr=sr, hop_length=HOP, aggregate=np.median),
+        "full": librosa.onset.onset_strength(y=y, sr=sr, hop_length=HOP),
+        "low": np.maximum(np.diff(np.log1p(S[f < 200]).sum(0), prepend=0), 0),    # 鼓點
+        "high": np.maximum(np.diff(np.log1p(S[f > 4000]).sum(0), prepend=0), 0),  # 鈸與高頻打擊
+    }
+    return {k: (None if o.std() < 1e-9 else _autocorr_curve(o, sr)) for k, o in onsets.items()}
+
+
+def tempo_candidates(curves: dict, k: int = 8, lo: float = 50, hi: float = 220) -> list[float]:
+    """打擊曲線上最強的幾個峰（bpm）。"""
+    if curves["perc"] is None:
+        return []
+    b, s = curves["perc"]
+    m = (b >= lo) & (b <= hi)
+    bb, ss = b[m], s[m]
+    pk, _ = find_peaks(ss, prominence=0.02)
+    pk = pk[np.argsort(-ss[pk])][:k]
+    return [float(bb[i]) for i in pk]
+
+
+def tempo_features(curves: dict, c: float) -> list[float]:
+    f = []
+    for kind in _KINDS:
+        if curves[kind] is None:
+            f += [0.0] * len(_RATIOS)
+            continue
+        b, s = curves[kind]
+        mx = s.max() + 1e-9
+        f += [float(np.interp(c * r, b, s, left=0, right=0)) / mx for r in _RATIOS]
+    pb, ps = curves["perc"]
+    f.append(float(np.interp(c, pb, ps)))
+    return f
+
+
+def _tree_score(x: list[float]) -> float:
+    """訓練好的梯度提升樹（bpm_model_data）：回傳該候選是「正確速度」的機率。"""
+    import bpm_model_data      # 延後載入：訓練腳本第一次執行時這個檔案還不存在
+    raw = bpm_model_data.BASELINE
+    for feat, thr, left, right, val in bpm_model_data.TREES:
+        n = 0
+        while left[n] >= 0:
+            n = left[n] if x[feat[n]] <= thr[n] else right[n]
+        raw += val[n]
+    return 1.0 / (1.0 + np.exp(-raw))
 
 
 def estimate_bpm(y: np.ndarray, sr: int, y_p: np.ndarray | None = None) -> BpmResult:
     if y_p is None:
         y_p = librosa.effects.percussive(y, margin=2.0)
-    bpms, strength = _tempo_curve(y_p, sr)
-    if bpms is None:
+    curves = tempo_curves(y, y_p, sr)
+    cands = tempo_candidates(curves)
+    if not cands:
         raise ValueError("找不到明顯的節拍。")
-
-    # 同一個節拍的倍數（半速/倍速）自相關也會高，用先驗分佈決定取哪個
-    prior = np.exp(-0.5 * (np.log2(bpms / BPM_PRIOR_CENTER) / BPM_PRIOR_SIGMA) ** 2)
-    # 把 1/2、1、2 倍位置的自相關合併，讓真正的拍子比單一尖峰更穩
-    def at(scale):
-        return np.interp(bpms * scale, bpms, strength, left=0, right=0)
-    combined = strength + 0.5 * at(2.0) + 0.5 * at(0.5)
-    best = int(np.argmax(combined * prior))
-    bpm = float(bpms[best])
-
-    # 倍速/半速候選：自相關夠強才列出，讓使用者自己判斷
+    probs = [_tree_score(tempo_features(curves, c)) for c in cands]
+    order = np.argsort(probs)[::-1]
+    best = cands[order[0]]
     alts = []
-    for scale in (0.5, 2.0):
-        cand = bpm * scale
-        if BPM_MIN <= cand <= BPM_MAX:
-            i = int(np.argmin(np.abs(bpms - cand)))
-            lo, hi = max(0, i - 2), i + 3
-            if strength[lo:hi].max() >= 0.6 * strength[max(0, best - 2):best + 3].max():
-                alts.append(int(round(cand)))
-    return BpmResult(int(round(bpm)), alts)
+    for j in order[1:]:
+        c = cands[j]
+        if probs[j] >= ALT_MIN_PROB and all(abs(c - x) > 0.04 * x for x in [best] + alts) and len(alts) < ALT_MAX:
+            alts.append(c)
+    return BpmResult(int(round(best)), [int(round(a)) for a in alts])
 
 
 def detect_bpm(audio_path: str) -> BpmResult:
