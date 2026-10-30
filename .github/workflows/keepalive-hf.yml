@@ -1,0 +1,22 @@
+name: Keep HF Space awake
+
+# 免費 Hugging Face Space 約 48 小時沒人連線就會休眠；定時連一次網址即可維持喚醒。
+# 休眠中被連到也會自動喚醒。（排程只在預設分支執行；repo 60 天沒動靜 GitHub 會自動停用排程。）
+on:
+  schedule:
+    - cron: "17 */12 * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Space
+        run: |
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -m 120 -w "%{http_code}" https://winds00171-pitchpal.hf.space/ || true)
+            echo "attempt $i: HTTP $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 30
+          done
+          exit 1

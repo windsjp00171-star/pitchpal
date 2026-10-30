@@ -106,13 +106,16 @@ def estimate_key(y: np.ndarray, sr: int) -> KeyResult:
     best = int(order[0])
     root, mode = best % 12, ("大調" if best < 12 else "小調")
 
-    # 信心度：第一名與「第二名」的差距。相對大小調（如 C 大調 vs A 小調）本來就
-    # 容易混淆，所以另外列為候選，不算進差距，避免永遠顯示低信心。
+    # 信心度：「和曲子像不像這個調」（相關係數本身）與「贏第二名多少」各占一部分。
+    # 相對大小調（如 C 大調 / A 小調）本來就容易混淆，所以另外列為候選，不算進差距。
+    # GiantSteps 160 首實測：相關係數 <0.48 時完全命中僅 28%，>0.64 時約 56%；
+    # 差距 >0.16 時約 65%，其餘區間差異不大。
     relative = (root + 9) % 12 + 12 if best < 12 else (root + 3) % 12
     rivals = [int(i) for i in order[1:] if int(i) != relative]
     gap = float(scores[best] - scores[rivals[0]])
-    # 合成與真實音檔實測：差距約 0.01（難分）～0.17（明確）
-    confidence = int(round(min(1.0, max(0.0, gap / 0.10)) * 100))
+    fit = min(1.0, max(0.0, (float(scores[best]) - 0.35) / 0.35))
+    margin = min(1.0, max(0.0, gap / 0.16))
+    confidence = int(round(100 * (0.6 * fit + 0.4 * margin)))
 
     alternatives = [(relative % 12, "小調" if best < 12 else "大調")]
     runner = rivals[0]
