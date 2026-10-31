@@ -77,6 +77,8 @@ def main(folder, csv_path):
         k_rel = key_relation((key.root, key.mode), truth) if truth else "（答案看不懂）"
         want = float(r["BPM"]) if (r.get("BPM") or "").strip() else None
         b_txt = "—"
+        if not want and bpm:
+            b_txt = f"BPM 未驗證：偵測 {bpm.bpm}，也可能 {bpm.alternatives or '無'}"
         if want and bpm:
             b_txt = f"{bpm_relation(bpm.bpm, want, bpm.alternatives)}（{want:g}→{bpm.bpm}，也可能 {bpm.alternatives or '無'}）"
         t_txt = analysis.key_label(*truth) if truth else r.get("調性", "")
