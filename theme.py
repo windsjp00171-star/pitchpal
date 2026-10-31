@@ -89,10 +89,17 @@ window.ppMetro = {
     }
   },
   click(delay) {
-    const c = this.ctx, o = c.createOscillator(), g = c.createGain(), at = c.currentTime + delay;
-    o.frequency.value = 1000; g.gain.setValueAtTime(0.0001, at);
-    g.gain.exponentialRampToValueAtTime(0.7, at + 0.002); g.gain.exponentialRampToValueAtTime(0.0001, at + 0.05);
-    o.connect(g); g.connect(c.destination); o.start(at); o.stop(at + 0.06);
+    // 短促的「嗒」：高頻雜訊經帶通濾波（約 4.5 kHz）、快速衰減。刻意不用純音，免得像木魚。
+    const c = this.ctx, at = c.currentTime + delay;
+    if (!this.noiseBuf) {
+      const n = Math.floor(c.sampleRate * 0.05), buf = c.createBuffer(1, n, c.sampleRate), d = buf.getChannelData(0);
+      for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+      this.noiseBuf = buf;
+    }
+    const s = c.createBufferSource(), hp = c.createBiquadFilter(), g = c.createGain();
+    s.buffer = this.noiseBuf; hp.type = 'bandpass'; hp.frequency.value = 4500; hp.Q.value = 0.8;
+    g.gain.setValueAtTime(0.9, at); g.gain.exponentialRampToValueAtTime(0.0001, at + 0.04);
+    s.connect(hp); hp.connect(g); g.connect(c.destination); s.start(at); s.stop(at + 0.05);
   },
 };
 """
