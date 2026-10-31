@@ -284,19 +284,28 @@ def _rest(duration: float, sr: int) -> np.ndarray:
     return np.zeros(int(sr * duration), dtype=np.float32)
 
 
+def _tick(sr: int, accent: bool) -> np.ndarray:
+    """節拍的一聲「嗒」：高頻雜訊加一個很短的高音，快速衰減。刻意不用純音，免得聽起來像木魚。"""
+    dur = int(0.04 * sr)
+    t = np.arange(dur) / sr
+    spec = np.fft.rfft(np.random.default_rng(7).standard_normal(dur))
+    freqs = np.fft.rfftfreq(dur, 1 / sr)
+    noise = np.fft.irfft(spec * ((freqs > 2000) & (freqs < 8000)), dur)           # 只留 2–8 kHz：亮但不刺耳
+    tone = np.sin(2 * np.pi * (3400.0 if accent else 2600.0) * t) * np.exp(-t * 400)
+    tick = noise * np.exp(-t * 220) * 0.45 + tone * 0.6
+    return (tick / (np.max(np.abs(tick)) + 1e-9)) * (1.0 if accent else 0.8)
+
+
 def _click_track(total_samples: int, bpm: int, sr: int,
                  beats_per_bar: int = 4, vol: float = 0.18) -> np.ndarray:
     beat_samples = int(sr * 60.0 / bpm)
     click = np.zeros(total_samples, dtype=np.float32)
+    strong, weak = _tick(sr, True), _tick(sr, False)
     pos = 0
     beat_idx = 0
     while pos < total_samples:
-        # 強拍用 1000Hz，弱拍用 800Hz
-        freq = 1000.0 if (beat_idx % beats_per_bar == 0) else 800.0
-        dur = int(0.02 * sr)  # 20ms click
-        t = np.linspace(0, 0.02, dur, endpoint=False)
-        burst = np.sin(2 * np.pi * freq * t) * np.exp(-80 * t)
-        end = min(pos + dur, total_samples)
+        burst = strong if (beat_idx % beats_per_bar == 0) else weak
+        end = min(pos + len(burst), total_samples)
         click[pos:end] += burst[:end - pos]
         pos += beat_samples
         beat_idx += 1
