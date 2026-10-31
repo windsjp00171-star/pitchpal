@@ -62,3 +62,36 @@ def test_audio_helpers():
     y, sr = sf.read(click_audio(100))
     assert abs(len(y) / sr - 4.8) < 0.1          # 8 拍 @100 BPM
     assert scale_audio("C 大調") and scale_audio("—") is None and click_audio(0) is None
+
+
+def test_beat_phase_finds_grid_offset():
+    import numpy as np
+    from synth import beat_phase
+    onset = np.zeros(400)
+    onset[7::20] = 1.0
+    assert abs(beat_phase(onset, 20.0) - 7) <= 0.25
+
+
+def test_tonic_hz():
+    from synth import tonic_hz
+    assert abs(tonic_hz("C 大調") - 130.81) < 0.1       # C3
+    assert abs(tonic_hz("G 大調") - 98.0) < 0.1         # G2：落在低音區，不會太高
+    assert abs(tonic_hz("A 小調") - 110.0) < 0.1
+    assert tonic_hz("—") is None and tonic_hz(None) is None
+
+
+def test_metro_phase_on_synthetic_drums(tmp_path):
+    import numpy as np
+    import soundfile as sf
+    from synth import metro_phase
+    sr, bpm = 22050, 100
+    y = np.zeros(sr * 20, dtype=np.float32)
+    period = 60 / bpm
+    for k in range(int(20 / period)):
+        i = int((0.31 + k * period) * sr)               # 鼓點從 0.31 秒開始
+        y[i:i + 200] += np.hanning(200).astype(np.float32)
+    path = str(tmp_path / "drums.wav")
+    sf.write(path, y, sr)
+    got = metro_phase(path, bpm)
+    d = abs(((got - 0.31) + period / 2) % period - period / 2)    # 與 0.31 秒格線的距離
+    assert d < 0.03

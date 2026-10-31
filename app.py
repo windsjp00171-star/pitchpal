@@ -35,9 +35,9 @@ from keys import ALL_KEYS, GUITAR_KEYS, KEY_DISPLAY, MAJOR_KEYS, MINOR_KEYS, NOT
 from synth import (
     JIANPU_INTERVALS, MELODY_KEY_ROOTS, MELODY_KEYS, TIMBRE_CUTOFF, _RNG,
     _apply_quality_mod, _lowpass, _tone, _write_normalized,
-    click_audio, get_diatonic_chords, parse_and_synth, play_chord_audio, scale_audio,
+    click_audio, get_diatonic_chords, metro_phase, parse_and_synth, play_chord_audio, scale_audio, tonic_hz,
 )
-from theme import ACCENT, CSS, FORCE_LIGHT_JS, INK, MASTHEAD, PLAY_JS, THEME
+from theme import ACCENT, CSS, FORCE_LIGHT_JS, INK, MASTHEAD, METRO_HTML, METRO_LOAD_JS, PLAY_JS, THEME
 from tmpfiles import _reg_tmp
 from transcribe import transcribe_audio
 
@@ -732,8 +732,17 @@ with gr.Blocks(title="PitchPal", css=CSS, theme=THEME, js=FORCE_LIGHT_JS) as dem
                         value="—",
                         elem_classes="pp-big pp-bpm",
                     )
-                    click_btn = gr.Button("聽節拍（用偵測到的速度）", variant="secondary")
-                    preview_click = gr.Audio(label="試聽", type="filepath", interactive=False, autoplay=False, visible=False, elem_classes="pp-preview")
+                    bpm_try = gr.Number(
+                        label="試聽速度 BPM（可自己改，例如把 136 改成 70）",
+                        precision=0, minimum=30, maximum=300, value=None,
+                    )
+                    metro_btn = gr.Button("載入整首歌，用開關對拍", variant="secondary")
+                    metro_phase_num = gr.Number(visible=False)
+                    metro_hz_num = gr.Number(visible=False)
+                    metro_key_txt = gr.Textbox(visible=False)
+                    gr.HTML(METRO_HTML)
+                    click_btn = gr.Button("只聽節拍（至少 12 秒）", variant="secondary")
+                    preview_click = gr.Audio(label="節拍", type="filepath", interactive=False, autoplay=False, visible=False, elem_classes="pp-preview")
                     confidence_box = gr.Textbox(
                         label="辨識把握度與提醒",
                         interactive=False,
@@ -849,13 +858,25 @@ with gr.Blocks(title="PitchPal", css=CSS, theme=THEME, js=FORCE_LIGHT_JS) as dem
             def _shown(path):
                 return gr.Audio(value=path, visible=bool(path))
 
-            def _click_for(text):
-                m = re.search(r"\d+", text or "")
-                return _shown(click_audio(int(m.group()) if m else 0))
+            def _click_for(bpm):
+                return _shown(click_audio(int(bpm) if bpm else 0))
 
+            def _bpm_from_text(text):
+                m = re.search(r"\d+", text or "")
+                return int(m.group()) if m else None
+
+            bpm_box.change(_bpm_from_text, bpm_box, bpm_try, show_progress="hidden")
+            def _metro_prepare(path, bpm, detected, override):
+                key = detected if (not override or override == "（使用自動偵測）") else override
+                return metro_phase(path, int(bpm) if bpm else 0), tonic_hz(key), key
+
+            metro_btn.click(
+                _metro_prepare, [audio_input, bpm_try, detected_key_box, key_override],
+                [metro_phase_num, metro_hz_num, metro_key_txt], show_progress="minimal",
+            ).then(fn=None, inputs=[audio_input, bpm_try, metro_phase_num, metro_hz_num, metro_key_txt], js=METRO_LOAD_JS)
             play_orig_btn.click(lambda k: _shown(scale_audio(k)), detected_key_box, preview_orig_scale, show_progress="hidden").then(fn=None, inputs=[preview_orig_scale], js=PLAY_JS)
             play_target_btn.click(lambda k: _shown(scale_audio(k)), result_key_box, preview_target_scale, show_progress="hidden").then(fn=None, inputs=[preview_target_scale], js=PLAY_JS)
-            click_btn.click(_click_for, bpm_box, preview_click, show_progress="hidden").then(fn=None, inputs=[preview_click], js=PLAY_JS)
+            click_btn.click(_click_for, bpm_try, preview_click, show_progress="hidden").then(fn=None, inputs=[preview_click], js=PLAY_JS)
             step_down_btn.click(lambda v: max(-12, int(v) - 1), steps_slider, steps_slider, show_progress="hidden")
             step_up_btn.click(lambda v: min(12, int(v) + 1), steps_slider, steps_slider, show_progress="hidden")
 

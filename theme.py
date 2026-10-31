@@ -30,8 +30,75 @@ THEME = gr.themes.Base(
     button_secondary_text_color=INK,
 )
 
+# 整首對拍：歌用一般的 <audio>，節拍用 Web Audio 依歌的播放時間排程，所以暫停、拖曳進度都對得上；
+# 節拍開關可在播放中隨時切換。
+METRO_JS = """
+window.ppMetro = {
+  on: false, drone: false, nodes: null, hz: 0, bpm: 0, phase: 0, ctx: null, timer: null, last: -1,
+  audio() { return document.getElementById('pp-metro-audio'); },
+  ensureCtx() {
+    if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (this.ctx.state === 'suspended') this.ctx.resume();
+  },
+  load(url, bpm, phase, hz, keyLabel) {
+    const a = this.audio();
+    if (!a || !url || !bpm || phase === null || phase === undefined) return;
+    this.bpm = bpm; this.phase = phase; this.last = -1; this.hz = hz || 0;
+    this.stopDrone();
+    a.src = url; a.currentTime = 0;
+    a.onseeked = () => { this.last = -1; };
+    a.onplay = () => { if (this.drone) { this.ensureCtx(); this.startDrone(); } };
+    a.onpause = () => this.stopDrone();
+    a.onended = () => this.stopDrone();
+    const lab = document.getElementById('pp-drone-label'); if (lab) lab.textContent = '主音' + (keyLabel ? '（' + keyLabel + '）' : '') + ' 開／關';
+    const info = document.getElementById('pp-metro-info');
+    if (info) info.textContent = '已載入。按播放，再用下面的開關隨時打開或關掉「節拍」（' + bpm + ' BPM）與「主音」。';
+    document.getElementById('pp-metro').classList.add('ready');
+    if (!this.timer) this.timer = setInterval(() => this.tick(), 25);
+  },
+  setOn(v) { this.on = v; this.last = -1; if (v) this.ensureCtx(); },
+  setDrone(v) {
+    this.drone = v;
+    if (v) { this.ensureCtx(); const a = this.audio(); if (a && !a.paused) this.startDrone(); } else this.stopDrone();
+  },
+  startDrone() {
+    if (!this.hz || this.nodes || !this.ctx) return;
+    const c = this.ctx, g = c.createGain(), now = c.currentTime;
+    g.gain.setValueAtTime(0.0001, now); g.gain.exponentialRampToValueAtTime(0.16, now + 0.2);
+    const oscs = [[this.hz, 'triangle', 0.5], [this.hz * 1.5, 'triangle', 0.22], [this.hz / 2, 'sine', 0.4]].map(([f, type, amp]) => {
+      const o = c.createOscillator(), og = c.createGain(); o.type = type; o.frequency.value = f; og.gain.value = amp;
+      o.connect(og); og.connect(g); o.start(); return o;
+    });
+    g.connect(c.destination); this.nodes = { g, oscs };
+  },
+  stopDrone() {
+    if (!this.nodes) return;
+    const { g, oscs } = this.nodes, c = this.ctx, now = c.currentTime;
+    g.gain.cancelScheduledValues(now); g.gain.setValueAtTime(Math.max(g.gain.value, 0.0001), now);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.2); oscs.forEach(o => o.stop(now + 0.25)); this.nodes = null;
+  },
+  tick() {
+    const a = this.audio();
+    if (!this.on || !a || a.paused || !this.bpm || !this.ctx) return;
+    const period = 60 / this.bpm, t = a.currentTime, ahead = 0.12;
+    let k = Math.ceil((t - this.phase) / period - 1e-6);
+    let tb = this.phase + k * period;
+    while (tb < t + ahead) {
+      if (tb >= t - 0.02 && k > this.last) { this.click(Math.max(0, tb - t)); this.last = k; }
+      k++; tb = this.phase + k * period;
+    }
+  },
+  click(delay) {
+    const c = this.ctx, o = c.createOscillator(), g = c.createGain(), at = c.currentTime + delay;
+    o.frequency.value = 1000; g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(0.7, at + 0.002); g.gain.exponentialRampToValueAtTime(0.0001, at + 0.05);
+    o.connect(g); g.connect(c.destination); o.start(at); o.stop(at + 0.06);
+  },
+};
+"""
+
 # Gradio 會依系統設定加上 .dark；現場多半在明亮空間，固定亮色。
-FORCE_LIGHT_JS = """() => {
+_LIGHT_BODY = """
   const light = () => {
     document.documentElement.classList.remove('dark');
     document.body.classList.remove('dark');
@@ -49,7 +116,10 @@ FORCE_LIGHT_JS = """() => {
   const opts = { attributes: true, attributeFilter: ['class'] };
   new MutationObserver(light).observe(document.body, opts);
   new MutationObserver(light).observe(document.documentElement, opts);
-}"""
+"""
+
+# 頁面載入時執行：節拍器 + 固定亮色 + 上傳區中文化
+FORCE_LIGHT_JS = "() => {\n" + METRO_JS + _LIGHT_BODY + "\n}"
 
 # 結果回來後自己播一次。不用 Gradio 內建的 autoplay：它在不同瀏覽器上會對同一個聲音播兩次。
 PLAY_JS = """(a) => {
@@ -60,6 +130,25 @@ PLAY_JS = """(a) => {
   window.__ppAudio = au;
   au.play().catch(() => {});
 }"""
+
+METRO_LOAD_JS = "(a, bpm, phase, hz, key) => { window.ppMetro.load(a && (a.url || a.path), bpm, phase, hz, key); }"
+
+METRO_HTML = """
+<div id="pp-metro" class="pp-metro">
+  <audio id="pp-metro-audio" controls preload="auto"></audio>
+  <label class="pp-switch">
+    <input type="checkbox" onchange="ppMetro.setOn(this.checked)">
+    <span class="pp-switch-track"><span class="pp-switch-knob"></span></span>
+    <span class="pp-switch-label">節拍 開／關</span>
+  </label>
+  <label class="pp-switch">
+    <input type="checkbox" onchange="ppMetro.setDrone(this.checked)">
+    <span class="pp-switch-track"><span class="pp-switch-knob"></span></span>
+    <span class="pp-switch-label" id="pp-drone-label">主音 開／關</span>
+  </label>
+  <p id="pp-metro-info" class="pp-hint">上傳歌曲後按上方「載入整首歌」。載入後按播放，再用下面的開關在播放中隨時打開或關掉節拍與主音。</p>
+</div>
+"""
 
 MASTHEAD = """
 <div class="pp-masthead">
@@ -120,6 +209,17 @@ input[type="number"] { font-size: 1.1rem !important; font-weight: 700 !important
 .pp-kb { padding: 6px 2px 2px; }
 .pp-kb-cap { font-size: 0.95rem; font-weight: 700; color: var(--muted); margin-bottom: 6px; }
 .pp-kb-svg { display: block; width: 100%; height: auto; max-width: 440px; }
+
+/* 整首對拍 */
+.pp-metro { margin: 4px 0 10px; }
+.pp-metro audio { width: 100%; height: 48px; }
+.pp-switch { display: flex; align-items: center; gap: 12px; min-height: 48px; cursor: pointer; font-weight: 800; font-size: 1.1rem; }
+.pp-switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.pp-switch-track { width: 60px; height: 34px; border: 3px solid var(--ink); border-radius: 17px; background: #fff; position: relative; flex: none; transition: background 0.15s ease-out; }
+.pp-switch-knob { position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: var(--ink); transition: transform 0.15s ease-out; }
+.pp-switch input:checked + .pp-switch-track { background: var(--accent); border-color: var(--accent); }
+.pp-switch input:checked + .pp-switch-track .pp-switch-knob { transform: translateX(26px); background: #fff; }
+.pp-switch input:focus-visible + .pp-switch-track { outline: 3px solid var(--accent); outline-offset: 3px; }
 
 /* 五線譜 */
 .pp-staff-svg { display: block; max-width: 100%; height: auto; margin: 0 0 6px; }
