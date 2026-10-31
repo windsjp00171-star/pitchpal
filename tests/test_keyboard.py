@@ -60,7 +60,7 @@ def test_audio_helpers():
     import soundfile as sf
     from synth import click_audio, scale_audio
     y, sr = sf.read(click_audio(100))
-    assert abs(len(y) / sr - 4.8) < 0.1          # 8 拍 @100 BPM
+    assert 12.0 <= len(y) / sr < 15.0            # 至少 12 秒（整數個小節）
     assert scale_audio("C 大調") and scale_audio("—") is None and click_audio(0) is None
 
 
