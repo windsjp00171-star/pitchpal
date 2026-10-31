@@ -229,6 +229,7 @@ button { min-height: 44px; }
 @media (max-width: 768px) {
   .gradio-container { padding: 8px !important; font-size: 17px; }
   .pp-key textarea, .pp-key input[type="text"] { font-size: 3.4rem !important; }
+  .pp-bpm textarea, .pp-bpm input[type="text"] { font-size: 2rem !important; }
   .chord-palette, .note-palette, .mod-palette { flex-wrap: wrap !important; gap: 6px !important; }
   .chord-palette button, .note-palette button, .mod-palette button { flex: 1 1 auto !important; }
   button { min-height: 48px; }
