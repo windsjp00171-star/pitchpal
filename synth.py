@@ -481,13 +481,55 @@ def _apply_quality_mod(chord: str, mod: str) -> str:
 
 # ── 介面用的短音檔：聽節拍、聽音階 ─────────────────────────────────────────────
 
-def click_audio(bpm: int, beats: int = 8) -> str | None:
-    """以偵測到的 BPM 打節拍（每 4 拍一個重音），讓人聽出速度對不對。"""
+def click_audio(bpm: int, min_seconds: float = 12.0) -> str | None:
+    """以指定 BPM 打節拍（每 4 拍一個重音），至少 min_seconds 秒。"""
     if not bpm or bpm < 30 or bpm > 300:
         return None
     sr = 44100
+    beats = max(8, int(np.ceil(min_seconds * bpm / 60.0 / 4)) * 4)
     total = int(sr * 60.0 / bpm * beats)
     return _write_normalized(_click_track(total, bpm, sr, 4, 1.0), sr)
+
+
+def beat_phase(onset: np.ndarray, period: float) -> float:
+    """在 onset 強度上找節拍格線的起點（以 frame 計）：讓格線落點的平均 onset 最大。"""
+    best, best_score = 0.0, -1.0
+    for ph in np.arange(0.0, period, 0.25):
+        idx = np.round(ph + np.arange(int((len(onset) - ph) // period) + 1) * period).astype(int)
+        idx = idx[idx < len(onset)]
+        if len(idx) == 0:
+            continue
+        score = float(onset[idx].mean())
+        if score > best_score:
+            best, best_score = float(ph), score
+    return best
+
+
+def tonic_hz(key_str: str | None) -> float | None:
+    """調性（如 "G 大調"）的主音頻率，落在 G2–F#3，適合當低音參考。"""
+    parts = (key_str or "").split()
+    if len(parts) < 2 or parts[0].split("/")[0] not in NOTE_MAP:
+        return None
+    root = NOTE_MAP[parts[0].split("/")[0]]
+    midi = 48 + root if root <= 6 else 36 + root
+    return 440.0 * 2 ** ((midi - 69) / 12)
+
+
+def metro_phase(audio_path: str | None, bpm: int, seconds: int = 90) -> float | None:
+    """節拍格線的起點（秒，從檔案開頭算起）：格線 t = phase + k * 60/bpm 會落在歌的拍點上。
+    取歌中段約 90 秒的 onset 來對齊。"""
+    if not audio_path or not bpm or bpm < 30 or bpm > 300:
+        return None
+    import librosa
+    from analysis import HOP, SR
+    y, sr = librosa.load(audio_path, sr=SR, mono=True)
+    n = min(len(y), int(seconds * sr))
+    start = (len(y) - n) // 2
+    onset = librosa.onset.onset_strength(y=y[start:start + n], sr=sr, hop_length=HOP)
+    period_frames = 60.0 * sr / (HOP * bpm)
+    local = beat_phase(onset, period_frames) * HOP / sr
+    period = 60.0 / bpm
+    return float((start / sr + local) % period)
 
 
 def scale_audio(key_str: str) -> str | None:
