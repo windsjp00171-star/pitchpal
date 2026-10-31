@@ -736,6 +736,9 @@ with gr.Blocks(title="PitchPal", css=CSS, theme=THEME, js=FORCE_LIGHT_JS) as dem
                         label="試聽速度 BPM（可自己改，例如把 136 改成 70）",
                         precision=0, minimum=30, maximum=300, value=None,
                     )
+                    with gr.Row():
+                        half_btn = gr.Button("速度 ÷2（太快時）", variant="secondary")
+                        double_btn = gr.Button("速度 ×2（太慢時）", variant="secondary")
                     metro_btn = gr.Button("載入整首歌，用開關對拍", variant="secondary")
                     metro_phase_num = gr.Number(visible=False)
                     metro_hz_num = gr.Number(visible=False)
@@ -866,6 +869,8 @@ with gr.Blocks(title="PitchPal", css=CSS, theme=THEME, js=FORCE_LIGHT_JS) as dem
                 return int(m.group()) if m else None
 
             bpm_box.change(_bpm_from_text, bpm_box, bpm_try, show_progress="hidden")
+            half_btn.click(lambda v: max(30, round(v / 2)) if v else v, bpm_try, bpm_try, show_progress="hidden")
+            double_btn.click(lambda v: min(300, round(v * 2)) if v else v, bpm_try, bpm_try, show_progress="hidden")
             def _metro_prepare(path, bpm, detected, override):
                 key = detected if (not override or override == "（使用自動偵測）") else override
                 return metro_phase(path, int(bpm) if bpm else 0), tonic_hz(key), key

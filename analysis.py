@@ -209,6 +209,25 @@ def _tree_score(x: list[float]) -> float:
     return 1.0 / (1.0 + np.exp(-raw))
 
 
+WORSHIP_SLOW_ABOVE = 110   # 敬拜歌先驗：第一名 ≥ 這個速度，且一半的速度也是候選時，改選一半
+WORSHIP_HALF_MIN = 55      # 一半的速度不能低於這個值
+
+
+def prefer_slow_octave(cands: list[float], probs: list[float]) -> list[int]:
+    """依機率由高到低排序的候選索引；套用敬拜歌先驗：第一名 ≥ 110 BPM 而一半也是候選，就把一半排到第一。
+    依據：使用者以譜面確認的 7 首敬拜歌裡 6 首是慢拍（62–79），模型的機率分不開快慢（慢歌與快歌的
+    「半速／倍速」機率比值互相重疊）。在電子舞曲上這條規則會讓嚴格命中從 85.5% 降到約 20%，所以只用在敬拜歌。"""
+    order = [int(i) for i in np.argsort(probs)[::-1]]
+    best = cands[order[0]]
+    if best >= WORSHIP_SLOW_ABOVE and best / 2 >= WORSHIP_HALF_MIN:
+        for j in order[1:]:
+            if abs(cands[j] - best / 2) <= 0.04 * best / 2:
+                order.remove(j)
+                order.insert(0, j)
+                break
+    return order
+
+
 def estimate_bpm(y: np.ndarray, sr: int, y_p: np.ndarray | None = None) -> BpmResult:
     if y_p is None:
         y_p = librosa.effects.percussive(y, margin=2.0)
@@ -217,12 +236,14 @@ def estimate_bpm(y: np.ndarray, sr: int, y_p: np.ndarray | None = None) -> BpmRe
     if not cands:
         raise ValueError("找不到明顯的節拍。")
     probs = [_tree_score(tempo_features(curves, c)) for c in cands]
-    order = np.argsort(probs)[::-1]
+    order = prefer_slow_octave(cands, probs)
     best = cands[order[0]]
     alts = []
     for j in order[1:]:
         c = cands[j]
-        if probs[j] >= ALT_MIN_PROB and all(abs(c - x) > 0.04 * x for x in [best] + alts) and len(alts) < ALT_MAX:
+        # 剛被換掉的另一個八度一定列出；其他候選機率夠高才列
+        ok = probs[j] >= ALT_MIN_PROB or abs(c - 2 * best) <= 0.04 * 2 * best
+        if ok and all(abs(c - x) > 0.04 * x for x in [best] + alts) and len(alts) < ALT_MAX:
             alts.append(c)
     return BpmResult(int(round(best)), [int(round(a)) for a in alts])
 

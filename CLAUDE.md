@@ -37,7 +37,7 @@ pitchpal/
 ```
 
 ## 核心邏輯
-- `analysis.detect_key` / `detect_bpm` — 調性：和聲成分 → 調音校正（偏差 ≥1/6 半音才套用）→ 中頻、低音、高音三組色度 → 學出來的 24 調打分模型（`_W`/`_B`，由 `tools/train_key_model.py` 以 GiantSteps 與 GiantSteps-MTG 訓練）；把握度為最高機率，並回報其餘兩個候選。BPM：四種節奏訊號的自相關 → 候選速度 → 訓練好的樹模型（`bpm_model_data.py`，由 `tools/train_bpm_model.py` 產生；純數字、網站不需 scikit-learn）挑最像拍子的那個，並列出機率夠高的其他候選。
+- `analysis.detect_key` / `detect_bpm` — 調性：和聲成分 → 調音校正（偏差 ≥1/6 半音才套用）→ 中頻、低音、高音三組色度 → 學出來的 24 調打分模型（`_W`/`_B`，由 `tools/train_key_model.py` 以 GiantSteps 與 GiantSteps-MTG 訓練）；把握度為最高機率，並回報其餘兩個候選。BPM：四種節奏訊號的自相關 → 候選速度 → 訓練好的樹模型（`bpm_model_data.py`，由 `tools/train_bpm_model.py` 產生；純數字、網站不需 scikit-learn）挑最像拍子的那個，並列出機率夠高的其他候選；再套用敬拜歌慢拍先驗（`prefer_slow_octave`：第一名 ≥110 且一半也是候選就改選一半）。
 - `app.analyze_audio` — 組成介面顯示文字（調性、可信度、BPM）。
 - 調性文字格式（如「C#/Db 大調」）被移調與 Capo 邏輯解析，不可改。
 

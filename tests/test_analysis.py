@@ -69,7 +69,10 @@ class TestDetectBpm:
     @pytest.mark.parametrize("bpm", [68, 84, 96, 128])
     def test_bpm_within_3_percent(self, tmp_path, bpm):
         path = _write(tmp_path, _song(0, "大調", bpm))
-        assert abs(analysis.detect_bpm(path).bpm - bpm) / bpm < 0.03
+        r = analysis.detect_bpm(path)
+        # 敬拜歌先驗：110 以上的快歌預設報一半，快的那個會列在「也可能是」
+        candidates = [r.bpm] + (r.alternatives if bpm >= analysis.WORSHIP_SLOW_ABOVE else [])
+        assert any(abs(c - bpm) / bpm < 0.03 for c in candidates)
 
     def test_slow_song_not_doubled(self, tmp_path):
         # 回歸：舊版 librosa beat_track 預設偏向 120，慢歌常被誤判成倍速
@@ -146,3 +149,20 @@ class TestKeyModel:
         c[[0, 2, 4, 5, 7, 9, 11]] = [3, 1, 2, 1.5, 2.5, 1, 0.5]       # C 大調音階，主音最重
         c = c / c.sum()
         assert analysis._key_probabilities(c, c, c).argmax() in (0, 21)   # C 大調，或其相對小調 A 小調
+
+
+class TestPreferSlowOctave:
+    def test_halves_a_fast_first_choice(self):
+        # 第一名 136，一半 68 也是候選 → 68 排第一，136 退到第二
+        order = analysis.prefer_slow_octave([136.0, 68.0, 90.0], [0.95, 0.09, 0.01])
+        assert order[0] == 1 and order[1] == 0
+
+    def test_keeps_a_slow_first_choice(self):
+        assert analysis.prefer_slow_octave([74.0, 152.0], [0.05, 0.03])[0] == 0
+
+    def test_no_half_candidate_keeps_first(self):
+        assert analysis.prefer_slow_octave([136.0, 90.0], [0.9, 0.2])[0] == 0
+
+    def test_half_must_not_be_too_slow(self):
+        # 104 的一半是 52，低於下限 → 不換
+        assert analysis.prefer_slow_octave([104.0, 52.0], [0.9, 0.5])[0] == 0
